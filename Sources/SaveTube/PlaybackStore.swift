@@ -13,12 +13,20 @@ final class PlaybackStore: ObservableObject {
     @Published private(set) var duration: Double = 0
     @Published private(set) var currentTime: Double = 0
     @Published private(set) var error: String?
+    @Published private(set) var title = ""
+    @Published private(set) var artist = ""
+    @Published private(set) var album = ""
+    @Published private(set) var queue: [MediaFile] = []
+    @Published private(set) var shuffleEnabled = false
+    @Published private(set) var repeatMode: RepeatMode = .off
+    @Published private(set) var favoriteIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "SaveTube.favoriteTracks") ?? [])
+    enum RepeatMode { case off, all, one }
+    private var originalQueue: [MediaFile] = []
     @Published var volume: Double = 0.8 {
         didSet { player.volume = Float(min(max(volume, 0), 1)) }
     }
 
     let player = AVPlayer()
-    private var queue: [MediaFile] = []
     private var timeObserver: Any?
     private var statusObservation: NSKeyValueObservation?
     private var durationObservation: NSKeyValueObservation?
@@ -59,7 +67,8 @@ final class PlaybackStore: ObservableObject {
             error = "Could not play \(file.url.lastPathComponent): the file is unavailable."
             return
         }
-        queue = newQueue.contains(file) ? newQueue : [file] + newQueue
+        originalQueue = newQueue.contains(where: { $0.id == file.id }) ? newQueue : [file] + newQueue
+        queue = shuffleEnabled ? [file] + originalQueue.filter { $0.id != file.id }.shuffled() : originalQueue
         start(file)
     }
 
@@ -78,6 +87,8 @@ final class PlaybackStore: ObservableObject {
         clearItemObservers()
         player.replaceCurrentItem(with: nil)
         queue = []
+        originalQueue = []
+        title = ""; artist = ""; album = ""
         currentFile = nil
         isPlaying = false
         currentTime = 0
@@ -100,6 +111,7 @@ final class PlaybackStore: ObservableObject {
             start(file)
             return
         }
+        if repeatMode == .all, let first = queue.first(where: { FileManager.default.isReadableFile(atPath: $0.url.path) }) { start(first); return }
         error = "No more available files in the queue."
     }
 
@@ -118,7 +130,7 @@ final class PlaybackStore: ObservableObject {
 
     var canGoNext: Bool {
         guard let currentFile, let index = queue.firstIndex(of: currentFile) else { return false }
-        return queue.dropFirst(index + 1).contains { FileManager.default.isReadableFile(atPath: $0.url.path) }
+        return queue.dropFirst(index + 1).contains { FileManager.default.isReadableFile(atPath: $0.url.path) } || (repeatMode == .all && queue.contains { FileManager.default.isReadableFile(atPath: $0.url.path) })
     }
 
     var canGoPrevious: Bool {
@@ -134,6 +146,8 @@ final class PlaybackStore: ObservableObject {
         clearItemObservers()
         let item = AVPlayerItem(url: file.url)
         currentFile = file
+        title = file.name; artist = ""; album = ""
+        loadMetadata(item: item)
         currentTime = 0
         duration = 0
         error = nil
@@ -161,8 +175,64 @@ final class PlaybackStore: ObservableObject {
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.player.currentItem === item else { return }
-                if self.canGoNext { self.next() } else { self.pause(); self.seek(to: 0) }
+                if self.repeatMode == .one {
+                    self.seek(to: 0); self.player.play(); self.isPlaying = true
+                } else if self.canGoNext { self.next() } else { self.pause(); self.seek(to: 0) }
             }
+        }
+    }
+
+    func toggleShuffle() {
+        shuffleEnabled.toggle()
+        if shuffleEnabled, let currentFile {
+            queue = [currentFile] + queue.filter { $0.id != currentFile.id }.shuffled()
+        } else { queue = originalQueue }
+    }
+
+    func cycleRepeat() {
+        switch repeatMode { case .off: repeatMode = .all; case .all: repeatMode = .one; case .one: repeatMode = .off }
+    }
+
+    func toggleFavorite() {
+        guard let id = currentFile?.id else { return }
+        if favoriteIDs.contains(id) { favoriteIDs.remove(id) } else { favoriteIDs.insert(id) }
+        UserDefaults.standard.set(Array(favoriteIDs), forKey: "SaveTube.favoriteTracks")
+    }
+
+    func removeFromQueue(_ file: MediaFile) {
+        guard file.id != currentFile?.id else { return }
+        queue.removeAll { $0.id == file.id }; originalQueue.removeAll { $0.id == file.id }
+    }
+
+    func moveQueueItems(from offsets: IndexSet, to destination: Int) {
+        let valid = offsets.filter { queue.indices.contains($0) }
+        let moving = valid.sorted().map { queue[$0] }
+        let insertion = destination - valid.filter { $0 < destination }.count
+        for index in valid.sorted(by: >) { queue.remove(at: index) }
+        queue.insert(contentsOf: moving, at: min(queue.count, max(0, insertion)))
+        if !shuffleEnabled { originalQueue = queue }
+    }
+
+    private func loadMetadata(item: AVPlayerItem) {
+        Task { [weak self] in
+            guard let items = try? await item.asset.load(.commonMetadata) else { return }
+            var values: [AVMetadataIdentifier: String] = [:]
+            for metadata in items {
+                let identifier: AVMetadataIdentifier
+                switch metadata.commonKey?.rawValue {
+                case "title": identifier = .commonIdentifierTitle
+                case "artist": identifier = .commonIdentifierArtist
+                case "albumName": identifier = .commonIdentifierAlbumName
+                default: continue
+                }
+                guard let value = try? await metadata.load(.stringValue), !value.isEmpty else { continue }
+                values[identifier] = value
+            }
+            guard let self, self.player.currentItem === item else { return }
+            self.title = values[.commonIdentifierTitle] ?? self.currentFile?.name ?? ""
+            self.artist = values[.commonIdentifierArtist] ?? ""
+            self.album = values[.commonIdentifierAlbumName] ?? ""
+            self.updateNowPlaying()
         }
     }
 
@@ -184,7 +254,9 @@ final class PlaybackStore: ObservableObject {
         guard let currentFile else { return }
         MPNowPlayingInfoCenter.default().playbackState = isPlaying ? .playing : .paused
         MPNowPlayingInfoCenter.default().nowPlayingInfo = [
-            MPMediaItemPropertyTitle: currentFile.name,
+            MPMediaItemPropertyTitle: title.isEmpty ? currentFile.name : title,
+            MPMediaItemPropertyArtist: artist,
+            MPMediaItemPropertyAlbumTitle: album,
             MPMediaItemPropertyPlaybackDuration: duration,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: currentTime,
             MPNowPlayingInfoPropertyPlaybackRate: isPlaying ? 1.0 : 0.0

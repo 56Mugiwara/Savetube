@@ -1,6 +1,6 @@
 # SaveTube for macOS
 
-A native Swift media library and MP4/MP3 downloader, with an Apple Music-inspired sidebar, artwork-led rows, in-app AVKit playback, a floating MiniPlayer, and an immersive window. Native Apple Liquid Glass is available on macOS 26+; earlier systems use the custom fallback.
+A native Swift MP4/MP3 downloader with its centered glass downloader interface as the main page, plus a separate Music-inspired Player workspace with artwork, AVKit playback, and an immersive window. Native Apple Liquid Glass is available on macOS 26+; earlier systems use the custom fallback.
 
 ## Install
 
@@ -8,20 +8,29 @@ Download the ZIP from [Releases](https://github.com/56Mugiwara/Savetube/releases
 
 The app bundles yt-dlp, FFmpeg, ffprobe, Deno, and Matugen. No Python, Homebrew, Rust, or separate helper installation is required to run it. The app is ad-hoc signed and is not Apple notarized. macOS may require allowing it in System Settings → Privacy & Security after the first launch attempt. Deno retains its upstream signature and JIT entitlements.
 
+## Pages
+
+The bottom Liquid Glass selection bar switches between **Downloader** and **Player**. Downloader opens first and retains the URL, format, filter, and search while you visit Player. Command-1 and Command-2 switch pages. Downloads and playback continue across page changes.
+
+Downloader keeps the link field, MP4/MP3/Both selector, Download/Open Folder controls, and compact file manager on the main page.
+
 ## Library and playback
+
+Open the **Player** tab for the Music-inspired library.
 
 - Browse All Media, Music, Videos, and Recently Added in the native sidebar. Search from the toolbar.
 - Import MP3 music and MP4 videos with **Import**, or drop them onto the library or a folder. Import copies the original files.
 - Create a folder from the sidebar. In All Media, folder disclosure arrows show or hide their tracks. Add tracks through drag-and-drop or their context menu.
 - Double-click a row, choose Play from its menu, or use the library Play/Shuffle controls. Playback stays inside SaveTube.
-- The floating MiniPlayer opens Now Playing, with seeking, volume, previous/next, and AVKit video playback. macOS media keys and Now Playing controls are supported.
+- The MiniPlayer stays inside the right-hand content column. Expanded Now Playing fills that column while the sidebar remains available. It includes seeking, volume, shuffle, repeat, favorites, editable Playing Next queue, native audio-output routing, and AVKit video playback. macOS media keys and Now Playing controls are supported.
 - Embedded audio artwork and video thumbnails are loaded asynchronously, with neutral media icons as fallbacks.
+- The expanded player uses artwork colors for its background and real audio spectrum. If artwork is absent, it samples the active desktop wallpaper; theme colors are the fallback when the wallpaper cannot be read. Audio analysis runs in the background, stays separate from playback, and follows the decoded file timeline. Ambient motion respects Reduce Motion.
 
 Folders are virtual collections: adding a file to one does not move the underlying file on disk.
 
 ## Download
 
-Open **Download** in the toolbar, paste a URL, and choose MP4, MP3, or Both. The selection bubble supports dragging, expands during the gesture, and springs into the nearest option. Download progress stays visible in the library.
+Use the main **Downloader** page, paste a URL, and choose MP4, MP3, or Both. The Player toolbar also offers a compact Download popover. The selection bubble supports dragging, expands during the gesture, and springs into the nearest option. Download progress stays visible in the library.
 
 Command-period cancels a download. Shift-Command-R retries the previous download; partial files resume when supported. Video IDs in filenames prevent same-title collisions, and completed IDs are archived per format to avoid repeat downloads. Website availability and restrictions can affect downloading. Only save media you have permission to download.
 
@@ -58,6 +67,8 @@ Requires macOS, a Swift toolchain with a macOS 26 SDK, curl, make, pkg-config, a
 ./scripts/test-downloads.sh --real
 ./scripts/test-playback.sh
 ./scripts/test-theme.sh
+./scripts/test-visualizer.sh
+./scripts/test-palette.sh
 ```
 
 The build verifies pinned downloads, compiles static FFmpeg/LAME and native Matugen, bundles signed Deno, verifies the app signature, and creates `dist/SaveTube.app`, a ZIP, and a SHA256 checksum. The first build takes longer. GitHub Actions supports manual builds.

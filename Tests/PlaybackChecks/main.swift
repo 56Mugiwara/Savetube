@@ -27,6 +27,7 @@ struct PlaybackChecks {
 
         store.play(first, queue: [first, second])
         try await until("MP3 duration") { store.duration > 3 && store.player.currentItem?.status == .readyToPlay }
+        try await until("embedded track metadata") { store.title == "Fixture Track" && store.artist == "Fixture Artist" }
         try await until("MP3 playback time advances") { store.currentTime > 0.3 }
         guard store.currentFile == first, store.player.currentItem != nil else { throw CheckFailure(description: "MP3 was not loaded into AVPlayer") }
 
@@ -46,12 +47,34 @@ struct PlaybackChecks {
         store.play(missing, queue: [missing])
         guard store.error != nil, store.currentFile == first else { throw CheckFailure(description: "Missing file did not report an error and preserve current media") }
 
+        store.play(first, queue: [first, second])
+        store.toggleShuffle()
+        guard store.shuffleEnabled, Set(store.queue.map(\.id)) == Set([first.id, second.id]) else { throw CheckFailure(description: "Shuffle lost queue tracks") }
+        store.toggleShuffle()
+        guard !store.shuffleEnabled, store.queue == [first, second] else { throw CheckFailure(description: "Disabling shuffle did not restore queue order") }
+        store.cycleRepeat()
+        guard store.repeatMode == .all else { throw CheckFailure(description: "Repeat all was not enabled") }
+        store.play(second, queue: [first, second]); store.next()
+        guard store.currentFile == first else { throw CheckFailure(description: "Repeat all did not wrap the queue") }
+        store.cycleRepeat()
+        guard store.repeatMode == .one else { throw CheckFailure(description: "Repeat one was not enabled") }
+        store.cycleRepeat()
+        guard store.repeatMode == .off else { throw CheckFailure(description: "Repeat did not cycle off") }
+        store.moveQueueItems(from: IndexSet(integer: 0), to: 2)
+        guard store.queue == [second, first] else { throw CheckFailure(description: "Queue reordering failed") }
+        store.removeFromQueue(second)
+        guard store.queue == [first] else { throw CheckFailure(description: "Removing an upcoming queue item failed") }
+        let wasFavorite = store.favoriteIDs.contains(first.id)
+        store.toggleFavorite()
+        guard store.favoriteIDs.contains(first.id) != wasFavorite else { throw CheckFailure(description: "Favorite did not toggle") }
+        store.toggleFavorite()
+
         store.stop()
         guard store.currentFile == nil, store.player.currentItem == nil, !store.isPlaying,
               store.duration == 0, store.currentTime == 0, store.error == nil else {
             throw CheckFailure(description: "Stop did not reset player state")
         }
-        print("PASS playback: MP3 and MP4 AVPlayer loading, duration, advancing time, pause, seek, queue navigation, missing file, stop")
+        print("PASS playback: MP3 and MP4 AVPlayer loading, duration, advancing time, pause, seek, queue navigation, missing file, metadata, shuffle, repeat, queue editing, favorites, stop")
     }
 
     @MainActor

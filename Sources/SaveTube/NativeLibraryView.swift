@@ -3,13 +3,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 private enum LibraryDestination: Hashable {
-    case all, music, videos, recent, folder(String)
+    case all, music, videos, recent, favorites, folder(String)
     var title: String {
         switch self {
         case .all: return "Library"
         case .music: return "Music"
         case .videos: return "Videos"
         case .recent: return "Recently Added"
+        case .favorites: return "Favorites"
         case .folder(let name): return name
         }
     }
@@ -19,6 +20,7 @@ private enum LibraryDestination: Hashable {
 struct NativeLibraryView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
+    var navigationBar: AnyView? = nil
     @ObservedObject private var playback = PlaybackStore.shared
     @ObservedObject private var theme = ThemeStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -47,6 +49,7 @@ struct NativeLibraryView: View {
             switch destination ?? .all {
             case .music: matchesDestination = file.kind == "MP3"
             case .videos: matchesDestination = file.kind == "MP4"
+            case .favorites: matchesDestination = playback.favoriteIDs.contains(file.id)
             case .folder(let name): matchesDestination = library.assignments[file.id] == name
             default: matchesDestination = true
             }
@@ -66,27 +69,32 @@ struct NativeLibraryView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 175, ideal: 205, max: 260)
         } detail: {
-            detail
+            Group {
+                if showPlayer {
+                    DetailNowPlayingView(store: playback) { withAnimation(motion) { showPlayer = false } }
+                } else {
+                    detail.safeAreaInset(edge: .bottom, spacing: 0) {
+                        if playback.currentFile != nil {
+                            MiniPlayer(store: playback) { withAnimation(motion) { showPlayer = true } }
+                                .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
+                    }
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                .safeAreaInset(edge: .bottom, spacing: 0) { if let navigationBar { navigationBar } }
         }
         .tint(accent)
         .background {
             if theme.glassBackground { WindowBackdrop(glass: true) }
             else { Color(nsColor: .windowBackgroundColor) }
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if playback.currentFile != nil {
-                MiniPlayer(store: playback) { showPlayer = true }
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .sheet(isPresented: $showPlayer) { NowPlayingView(store: playback).frame(width: 500, height: 630) }
         .overlay { settingsPanel }
         .sheet(isPresented: $naming) { namingPanel }
         .sheet(isPresented: $deleting) { deletionPanel }
         .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in showSettings = true }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in library.refresh() }
         .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in library.refresh() }
-        .onChange(of: destination) { _ in selection = nil }
+        .onChange(of: destination) { _ in selection = nil; showPlayer = false }
         .animation(motion, value: playback.currentFile?.id)
         .animation(motion, value: showSettings)
         .alert("Library", isPresented: Binding(get: { library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
@@ -100,6 +108,7 @@ struct NativeLibraryView: View {
                 Label("All Media", systemImage: "square.stack").tag(LibraryDestination.all)
                 Label("Music", systemImage: "music.note").tag(LibraryDestination.music)
                 Label("Videos", systemImage: "play.rectangle").tag(LibraryDestination.videos)
+                Label("Favorites", systemImage: "star").tag(LibraryDestination.favorites)
             } header: { Text("Library") }
             Section {
                 ForEach(library.folders, id: \.self) { folder in

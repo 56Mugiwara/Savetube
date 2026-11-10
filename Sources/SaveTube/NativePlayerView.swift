@@ -30,10 +30,10 @@ struct MiniPlayer: View {
                         HStack(spacing: 12) {
                             MediaArtwork(file: file, size: 44)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(file.name)
+                                Text(store.title.isEmpty ? file.name : store.title)
                                     .font(.system(size: 13, weight: .semibold))
                                     .lineLimit(1)
-                                Text(file.kind.uppercased() == "MP4" ? "Video" : "Audio")
+                                Text(store.artist.isEmpty ? (file.kind.uppercased() == "MP4" ? "Video" : "Audio") : store.artist)
                                     .font(.system(size: 11))
                                     .foregroundStyle(.secondary)
                             }

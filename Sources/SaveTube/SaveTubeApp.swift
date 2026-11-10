@@ -9,15 +9,19 @@ struct SaveTubeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
         WindowGroup("Savetube") {
-            NativeLibraryView(library: library, engine: engine)
-                .frame(minWidth: 800, idealWidth: 1080, minHeight: 620, idealHeight: 780)
+            SaveTubeRootView(library: library, engine: engine)
+                .frame(minWidth: 800, idealWidth: 900, minHeight: 680, idealHeight: 820)
                 .preferredColorScheme(.dark)
                 .onAppear { delegate.start(root: library.root, engine: engine) }
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1080, height: 780)
+        .defaultSize(width: 900, height: 820)
         .commands {
             SidebarCommands()
+            CommandMenu("Navigate") {
+                Button("Downloader") { NotificationCenter.default.post(name: .showSaveTubeDownloader, object: nil) }.keyboardShortcut("1")
+                Button("Player") { NotificationCenter.default.post(name: .showSaveTubePlayer, object: nil) }.keyboardShortcut("2")
+            }
             CommandMenu("Playback") {
                 Button("Play / Pause") { playback.toggle() }.disabled(playback.currentFile == nil)
                 Button("Next") { playback.next() }.keyboardShortcut(.rightArrow).disabled(!playback.canGoNext)

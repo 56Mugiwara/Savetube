@@ -95,3 +95,35 @@ Design research used Apple's Music user guides and native sidebar/material HIG:
 https://support.apple.com/en-gb/guide/iphone/ipha4521ef7d/27/ios
 https://developer.apple.com/design/human-interface-guidelines/sidebars
 https://developer.apple.com/design/human-interface-guidelines/materials
+
+## Version 1.1: dedicated downloader and detail-pane player
+
+The app now opens the restored centered downloader, with a bottom clear-glass
+Downloader/Player selection bar. The downloader's URL, format, filter, and search
+are kept in shared view state across page changes. Player retains the Music-style
+library; its MiniPlayer and page bar are inset within the detail column. Expanded
+Now Playing replaces the detail content rather than opening a window-modal sheet.
+The sidebar remains usable, and playback continues across page navigation.
+
+The expanded player adds metadata titles/artists, favorites, shuffle/repeat,
+editable queue, and native AVRoutePickerView routing. AVPlayer playback checks now
+cover embedded metadata, shuffle restoration, repeat cycling/wrap, queue editing,
+and favorite toggles in addition to the prior playback checks.
+
+`test-visualizer.sh` passed generated silent MP3, tonal MP3, MP4 AAC audio, a file
+changing from silence to tone over time, and cached switching. Visualization uses
+24 frequency bands from cancellable AVAssetReader/Accelerate analysis, not an
+unrelated animation or playback tap. `test-palette.sh` passed embedded-artwork
+color extraction, artwork precedence, and wallpaper-color fallback with controlled
+local fixtures. Native ImageIO supports wallpaper formats such as HEIC.
+
+A packaged UI smoke check verified Downloader as the landing page; link retention
+across tabs; MiniPlayer staying inside the right pane; expanded Now Playing and
+Playing Next occupying that pane with no modal sheet; and sidebar navigation while
+expanded playback was visible. The synthetic silent layout-check file was moved
+to Trash afterward; the user's existing library media was preserved.
+
+Design references include Apple's mobile Music guides and the BitChord upstream
+repository (read-only research; no third-party code or artwork was copied):
+https://support.apple.com/en-gb/guide/iphone/iph676daac9b/ios
+https://github.com/kushagrasinghx/BitChord
