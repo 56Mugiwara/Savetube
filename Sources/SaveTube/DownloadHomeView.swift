@@ -19,6 +19,8 @@ struct DownloadHomeView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
     @ObservedObject var state: DownloadHomeState
+    var isActive = true
+    let switchToPlayer: () -> Void
     let playInPlayer: (MediaFile) -> Void
     @ObservedObject private var theme = ThemeStore.shared
     @AppStorage("SaveTube.backgroundOpacity") private var backgroundOpacity = 0.72
@@ -33,6 +35,7 @@ struct DownloadHomeView: View {
     @State private var deletedFile: MediaFile?
     @State private var deletedFolder: String?
     @State private var deleteContents = false
+    @State private var hoveredLibraryRow: String?
     @FocusState private var searchFocused: Bool
     private var motion: Animation? { reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86) }
     private var matches: [MediaFile] {
@@ -41,15 +44,37 @@ struct DownloadHomeView: View {
             (state.query.isEmpty || $0.name.localizedCaseInsensitiveContains(state.query))
         }
     }
-    private var selectedFile: MediaFile? { library.files.first { $0.id == state.selected } }
+    private var visibleFolders: [String] {
+        library.folders.filter { folder in
+            state.query.isEmpty || matches.contains { library.assignments[$0.id] == folder }
+        }
+    }
+    private var selectedFile: MediaFile? { matches.first { $0.id == state.selected } }
     private var selectedFolder: String? {
         guard let value = state.selected, value.hasPrefix("folder:") else { return nil }
         let folder = String(value.dropFirst(7))
-        return library.folders.contains(folder) ? folder : nil
+        return visibleFolders.contains(folder) ? folder : nil
+    }
+    private var visibleRowIDs: [String] {
+        var ids: [String] = []
+        for folder in visibleFolders {
+            ids.append("folder:" + folder)
+            if library.expanded.contains(folder) || !state.query.isEmpty {
+                ids.append(contentsOf: matches.filter { library.assignments[$0.id] == folder }.map(\.id))
+            }
+        }
+        ids.append(contentsOf: matches.filter { library.assignments[$0.id] == nil }.map(\.id))
+        return ids
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Savetube").font(.system(size: 24, weight: .bold)).padding(.bottom, 24)
+            HStack {
+                Text("Savetube").font(.system(size: 24, weight: .bold))
+                Spacer()
+                Button("Player", action: switchToPlayer)
+                    .buttonStyle(.bordered).controlSize(.regular)
+                    .help("Open Player (Command-2)")
+            }.padding(.bottom, 24)
             HStack(spacing: 12) {
                 TextField("Paste a video link…", text: $state.link)
                     .textFieldStyle(.plain).font(.system(size: 13)).onSubmit(download)
@@ -85,34 +110,50 @@ struct DownloadHomeView: View {
                 Text(selectedFile.url.deletingLastPathComponent().path.replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).padding(.top, 8)
             }
+            DownloaderMiniPlayer(onOpenPlayer: switchToPlayer)
         }
-        .frame(maxWidth: 880).padding(.horizontal, 40).padding(.top, 38).padding(.bottom, 12)
+        .frame(maxWidth: 880).padding(.horizontal, 40).padding(.top, 62).padding(.bottom, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             if theme.glassBackground { WindowBackdrop(glass: true).overlay(Color.black.opacity(backgroundOpacity)) }
             else { Color.black }
         }
+        .ignoresSafeArea(.container, edges: .top)
         .overlay { settingsPanel }
         .sheet(isPresented: $naming) { namingPanel }
         .sheet(isPresented: $deleting) { deletionPanel }
-        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in settings = true }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in library.refresh() }
-        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in library.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in if isActive { settings = true } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in if isActive { library.refresh() } }
+        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive { library.refresh() } }
         .background {
             Button("") { searchFocused = true }.keyboardShortcut("f").hidden()
             Button("", action: paste).keyboardShortcut("v", modifiers: [.command, .shift]).hidden()
         }
-        .background(LibraryKeyboard(onMove: { _ in false }, onOpen: {
-            guard !naming && !deleting && !settings, let selectedFile else { return false }
-            playInPlayer(selectedFile); return true
+        .background(LibraryKeyboard(onMove: { direction in
+            guard isActive && !naming && !deleting && !settings && !visibleRowIDs.isEmpty else { return false }
+            let current = visibleRowIDs.firstIndex(of: state.selected ?? "")
+            let next = current.map { min(max(0, $0 + direction), visibleRowIDs.count - 1) }
+                ?? (direction < 0 ? visibleRowIDs.count - 1 : 0)
+            state.selected = visibleRowIDs[next]
+            return true
+        }, onOpen: {
+            guard isActive && !naming && !deleting && !settings, let selectedFile else { return false }
+            play(selectedFile); return true
         }, onEscape: {
-            guard searchFocused else { return false }; state.query = ""; searchFocused = false; return true
+            guard isActive && searchFocused else { return false }; state.query = ""; searchFocused = false; return true
+        }, onSpace: {
+            guard isActive && !naming && !deleting && !settings && library.lastError == nil,
+                  PlaybackStore.shared.currentFile != nil else { return false }
+            PlaybackStore.shared.toggle()
+            return true
         }).frame(width: 0, height: 0))
-        .alert("Library", isPresented: Binding(get: { library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
+        .alert("Library", isPresented: Binding(get: { isActive && library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
             Button("OK") { library.lastError = nil }
         } message: { Text(library.lastError ?? "") }
         .animation(motion, value: settings)
         .animation(motion, value: library.expanded)
+        .onChange(of: state.filter) { _ in state.selected = nil }
+        .onChange(of: state.query) { _ in state.selected = nil }
     }
     private var downloadStatus: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -142,48 +183,93 @@ struct DownloadHomeView: View {
         }.frame(height: 34)
     }
     private var fileList: some View {
-        ZStack {
-            if matches.isEmpty && library.folders.isEmpty {
-                Text(state.query.isEmpty ? "Nothing here yet." : "No matches.").font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-            List(selection: $state.selected) {
-                ForEach(library.folders.filter { folder in state.query.isEmpty || matches.contains { library.assignments[$0.id] == folder } }, id: \.self) { folder in
-                    DisclosureGroup(isExpanded: Binding(get: { library.expanded.contains(folder) || !state.query.isEmpty }, set: { value in
-                        if value { library.expanded.insert(folder) } else { library.expanded.remove(folder) }
-                    })) {
-                        ForEach(matches.filter { library.assignments[$0.id] == folder }) { file in row(file).tag(file.id) }
-                    } label: {
-                        HStack {
-                            Image(systemName: "folder").foregroundStyle(theme.accent.opacity(0.8))
-                            Text(folder).font(.system(size: 13, weight: .bold))
-                            Spacer()
-                            Text("\(matches.filter { library.assignments[$0.id] == folder }.count)").font(.caption).foregroundStyle(.secondary)
-                        }.padding(.vertical, 8).contentShape(Rectangle())
-                    }.tag("folder:" + folder)
-                    .contextMenu {
-                        Button("Import Music…") { importMedia(into: folder) }
-                        Button("Rename Folder…") { beginName(folder: folder) }
-                        Button("Delete Folder…", role: .destructive) { requestDelete(folder: folder) }
+        ScrollViewReader { scroll in
+        List {
+            ForEach(visibleFolders, id: \.self) { folder in
+                DisclosureGroup(isExpanded: Binding(get: { library.expanded.contains(folder) || !state.query.isEmpty }, set: { value in
+                    if value { library.expanded.insert(folder) } else { library.expanded.remove(folder) }
+                })) {
+                    ForEach(matches.filter { library.assignments[$0.id] == folder }) { file in row(file) }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 18))
+                            .foregroundStyle(theme.accent)
+                            .frame(width: 40, height: 40)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(theme.accent.opacity(0.12)))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(folder).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                            let count = matches.filter { library.assignments[$0.id] == folder }.count
+                            Text("\(count) \(count == 1 ? "item" : "items")")
+                                .font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
                     }
-                    .onDrop(of: [.plainText, .fileURL], isTargeted: nil) { drop($0, into: folder) }
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background { rowSurface(for: "folder:" + folder) }
+                    .contentShape(RoundedRectangle(cornerRadius: 12))
+                    .onHover { hoveredLibraryRow = $0 ? "folder:" + folder : nil }
+                    .onTapGesture { state.selected = "folder:" + folder }
+                    .accessibilityAddTraits(state.selected == "folder:" + folder ? [.isSelected] : [])
                 }
-                ForEach(matches.filter { library.assignments[$0.id] == nil }) { file in row(file).tag(file.id) }
-            }.listStyle(.plain).scrollContentBackground(.hidden)
-                .onDeleteCommand { requestDelete(file: selectedFile, folder: selectedFolder) }
-                .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, into: selectedFolder) }
+                .id("folder:" + folder)
+                .contextMenu {
+                    Button("Import Music…") { importMedia(into: folder) }
+                    Button("Rename Folder…") { beginName(folder: folder) }
+                    Button("Delete Folder…", role: .destructive) { requestDelete(folder: folder) }
+                }
+                .onDrop(of: [.plainText, .fileURL], isTargeted: nil) { drop($0, into: folder) }
+            }
+            ForEach(matches.filter { library.assignments[$0.id] == nil }) { file in row(file) }
+        }.listStyle(.plain).scrollContentBackground(.hidden)
+            .onDeleteCommand { requestDelete(file: selectedFile, folder: selectedFolder) }
+            .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, into: selectedFolder) }
+            .overlay {
+                if matches.isEmpty && visibleFolders.isEmpty {
+                    Text(state.query.isEmpty ? "Nothing here yet." : "No matches.")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+            }
+            .onChange(of: state.selected) { selected in
+                if let selected { withAnimation(motion) { scroll.scrollTo(selected, anchor: .center) } }
+            }
         }
     }
+    private func play(_ file: MediaFile) {
+        PlaybackStore.shared.play(file, queue: matches)
+    }
     private func row(_ file: MediaFile) -> some View {
-        HStack(spacing: 16) {
-            Circle().fill(Color.white.opacity(file.kind == "MP3" ? 0.8 : 0.4)).frame(width: 7, height: 7)
-            Text(file.name).font(.system(size: 13)).lineLimit(1)
+        HStack(spacing: 12) {
+            MediaArtwork(file: file, size: 40)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(file.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text("\(file.kind == "MP4" ? "Video" : "Audio") · \(file.url.deletingLastPathComponent().lastPathComponent)")
+                    .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
             Spacer()
-            Text(file.kind).font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
-        }.padding(.vertical, 10).contentShape(Rectangle())
-            .onTapGesture(count: 2) { playInPlayer(file) }
+            Button { state.selected = file.id; play(file) } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .contentShape(Rectangle())
+                    .modifier(ClearGlassControl())
+            }
+            .buttonStyle(GlassPressStyle())
+            .opacity(hoveredLibraryRow == file.id || state.selected == file.id ? 1 : 0)
+            .allowsHitTesting(hoveredLibraryRow == file.id || state.selected == file.id)
+            .help("Play here")
+            .accessibilityLabel("Play \(file.name)")
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background { rowSurface(for: file.id) }
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+        .onHover { hoveredLibraryRow = $0 ? file.id : nil }
+            .onTapGesture(count: 2) { state.selected = file.id; play(file) }
+            .onTapGesture { state.selected = file.id }
             .onDrag { NSItemProvider(object: file.id as NSString) }
             .contextMenu {
-                Button("Play in Player") { playInPlayer(file) }
+                Button("Play") { state.selected = file.id; play(file) }
                 Button("Show in Finder") { library.reveal(file) }
                 Button("Open With Default App") { library.open(file) }
                 Divider()
@@ -196,6 +282,14 @@ struct DownloadHomeView: View {
                 }
                 Button("Delete File…", role: .destructive) { requestDelete(file: file) }
             }
+            .id(file.id)
+            .accessibilityAddTraits(state.selected == file.id ? [.isSelected] : [])
+    }
+    @ViewBuilder private func rowSurface(for id: String) -> some View {
+        if state.selected == id || hoveredLibraryRow == id {
+            GlassSurface(radius: 12, highlighted: state.selected == id)
+                .allowsHitTesting(false)
+        }
     }
     @ViewBuilder private var settingsPanel: some View {
         if settings {

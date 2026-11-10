@@ -22,6 +22,11 @@ struct SaveTubeApp: App {
                 Button("Downloader") { NotificationCenter.default.post(name: .showSaveTubeDownloader, object: nil) }.keyboardShortcut("1")
                 Button("Player") { NotificationCenter.default.post(name: .showSaveTubePlayer, object: nil) }.keyboardShortcut("2")
             }
+            CommandGroup(after: .help) {
+                Button("Show Savetube Tour") {
+                    NotificationCenter.default.post(name: .showSaveTubeTour, object: nil)
+                }
+            }
             CommandMenu("Playback") {
                 Button("Play / Pause") { playback.toggle() }.disabled(playback.currentFile == nil)
                 Button("Next") { playback.next() }.keyboardShortcut(.rightArrow).disabled(!playback.canGoNext)
@@ -79,36 +84,55 @@ struct SegmentPill: View {
     @Binding var selection: String
     var small = false
     @State<CGFloat?> private var dragPosition = nil
-    @State<Bool> private var dragging = false
+    @State private var dragging = false
+    @State private var pressedSegment: String?
+    @State private var rubberX: CGFloat = 0
+    @State private var rubberY: CGFloat = 0
     @Namespace private var lensNamespace
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.76) }
+    private var lifted: Bool { pressedSegment != nil || dragging }
     var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width - 8
             let cell = width / CGFloat(values.count)
-            let index = CGFloat(values.firstIndex(of: selection) ?? 0)
-            let position = dragPosition ?? index * cell
-            GlassGroup {
+            let position = dragPosition ?? CGFloat(values.firstIndex(of: selection) ?? 0) * cell
+            let growX: CGFloat = lifted && !reduceMotion ? 14 : 0
+            let growY: CGFloat = lifted && !reduceMotion ? 12 : 0
+            let stretchX = reduceMotion ? 0 : abs(rubberX) * 0.8
+            let stretchY = reduceMotion ? 0 : abs(rubberY) * 0.8
             ZStack(alignment: .leading) {
-                SegmentLens(width: cell + (dragging && !reduceMotion ? 14 : 0),
-                            height: geometry.size.height - 8 + (dragging && !reduceMotion ? 12 : 0),
-                            namespace: lensNamespace, dragging: dragging, title: selection, small: small)
-                    .animation(spring, value: dragging)
-                    .offset(x: position + 4 - (dragging && !reduceMotion ? 7 : 0))
-                    .allowsHitTesting(false)
+                // Keep text OUTSIDE the glass container: the lens can move and
+                // refract its backdrop without moving or sampling the labels.
+                GlassGroup {
+                    SegmentLens(width: cell + growX + stretchX,
+                                height: geometry.size.height - 8 + growY + stretchY,
+                                namespace: lensNamespace, dragging: lifted)
+                }
+                .animation(spring, value: lifted)
+                .offset(x: position + 4 - (growX + stretchX) / 2 + (reduceMotion ? 0 : rubberX * 0.7),
+                        y: reduceMotion ? 0 : rubberY * 0.6)
+                .allowsHitTesting(false)
+                .zIndex(0)
                 HStack(spacing: 0) {
                     ForEach(values, id: \.self) { value in
                         Button {
                             withAnimation(spring) { selection = value; dragPosition = nil }
                         } label: {
                             Text(value).font(.system(size: small ? 10 : 12, weight: .bold))
-                                .foregroundStyle(selection == value ? Color.clear : Color(white: 0.72))
+                                .foregroundStyle(selection == value ? Color.white : Color(white: 0.72))
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityAddTraits(selection == value ? [.isSelected] : [])
+                        }
+                        .buttonStyle(SegmentPressStyle { down in
+                            withAnimation(spring) {
+                                if down { pressedSegment = value }
+                                else if pressedSegment == value { pressedSegment = nil }
+                            }
+                        })
+                        .accessibilityAddTraits(selection == value ? [.isSelected] : [])
                     }
-                }.padding(4)
+                }.padding(4).compositingGroup().zIndex(1)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .background(Capsule().fill(Color.white.opacity(0.055)))
@@ -117,18 +141,33 @@ struct SegmentPill: View {
             .simultaneousGesture(DragGesture(minimumDistance: 2, coordinateSpace: .local)
                 .onChanged { value in
                     if !dragging { withAnimation(spring) { dragging = true } }
-                    let left = min(max(0, value.location.x - 4 - cell / 2), width - cell)
+                    let rawLeft = value.location.x - 4 - cell / 2
+                    let left = min(max(0, rawLeft), width - cell)
                     var transaction = Transaction(); transaction.animation = nil
                     withTransaction(transaction) {
                         dragPosition = left
+                        rubberX = min(7, max(-7, (rawLeft - left) * 0.15))
+                        rubberY = min(6, max(-6, value.translation.height * 0.10))
                         let nearest = min(values.count - 1, max(0, Int((left / cell).rounded())))
                         if selection != values[nearest] { selection = values[nearest] }
                     }
                 }
-                .onEnded { _ in withAnimation(spring) { dragPosition = nil; dragging = false } })
+                .onEnded { _ in
+                    withAnimation(spring) { dragPosition = nil; dragging = false; rubberX = 0; rubberY = 0 }
+                })
             .animation(dragPosition == nil ? spring : nil, value: selection)
-            }
         }
+    }
+}
+
+/// Native button press state expands glass on mouse-down, before any drag.
+private struct SegmentPressStyle: ButtonStyle {
+    let changed: (Bool) -> Void
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .onChange(of: configuration.isPressed, perform: changed)
+            .onDisappear { changed(false) }
     }
 }
 

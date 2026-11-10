@@ -2,19 +2,46 @@ import AppKit
 import SwiftUI
 
 struct WindowChrome: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { ChromeView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    let downloaderVisible: Bool
+
+    func makeNSView(context: Context) -> ChromeView { ChromeView() }
+    func updateNSView(_ view: ChromeView, context: Context) {
+        view.downloaderVisible = downloaderVisible
+        view.applyChrome()
+        // NavigationSplitView installs its toolbar during the same SwiftUI update.
+        DispatchQueue.main.async { [weak view] in view?.applyChrome() }
+    }
+
     final class ChromeView: NSView {
+        var downloaderVisible = true
+        private var windowUpdateObserver: NSObjectProtocol?
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
+            if let windowUpdateObserver { NotificationCenter.default.removeObserver(windowUpdateObserver) }
+            windowUpdateObserver = nil
+            if let window {
+                windowUpdateObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.didUpdateNotification, object: window, queue: .main
+                ) { [weak self] _ in self?.applyChrome() }
+            }
+            applyChrome()
+        }
+
+        deinit {
+            if let windowUpdateObserver { NotificationCenter.default.removeObserver(windowUpdateObserver) }
+        }
+
+        func applyChrome() {
             guard let window else { return }
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.styleMask.insert(.fullSizeContentView)
-            window.titlebarSeparatorStyle = .none
-            window.isMovableByWindowBackground = true
-            window.backgroundColor = .black
-            window.toolbar = nil
+            if window.titleVisibility != .hidden { window.titleVisibility = .hidden }
+            if !window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = true }
+            if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
+            if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
+            if !window.isMovableByWindowBackground { window.isMovableByWindowBackground = true }
+            if let toolbar = window.toolbar, toolbar.isVisible == downloaderVisible {
+                toolbar.isVisible = !downloaderVisible
+            }
         }
     }
 }

@@ -109,9 +109,18 @@ private struct AudioAnalysis {
 
     func bands(at time: Double) -> [Float] {
         guard frameCount > 0 else { return [Float](repeating: 0, count: 24) }
-        let index = min(max(Int(((time - startTime) / frameInterval).rounded()), 0), frameCount - 1)
-        let offset = index * 24
-        return (0..<24).map { Float(values[offset + $0]) / 255 }
+        let position = min(max((time - startTime) / frameInterval, 0), Double(frameCount - 1))
+        let index = Int(floor(position))
+        let next = min(index + 1, frameCount - 1)
+        let fraction = Float(position - Double(index))
+        func smoothed(_ frame: Int, band: Int) -> Float {
+            let previous = max(0, frame - 1), following = min(frameCount - 1, frame + 1)
+            return (Float(values[previous * 24 + band]) + 2 * Float(values[frame * 24 + band]) + Float(values[following * 24 + band])) / (4 * 255)
+        }
+        return (0..<24).map { band in
+            let first = smoothed(index, band: band)
+            return first + (smoothed(next, band: band) - first) * fraction
+        }
     }
 
     static func read(url: URL) async throws -> AudioAnalysis {

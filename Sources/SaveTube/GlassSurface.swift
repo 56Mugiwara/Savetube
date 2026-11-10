@@ -47,20 +47,16 @@ struct SegmentLens: View {
     var height: CGFloat
     let namespace: Namespace.ID
     var dragging: Bool
-    var title: String
-    var small: Bool
     @ObservedObject private var theme = ThemeStore.shared
     var body: some View {
         if #available(macOS 26.0, *) {
-            Text(title).font(.system(size: small ? 10 : 12, weight: .bold)).foregroundStyle(.white)
-                .frame(width: width, height: height)
+            Capsule().fill(.clear).frame(width: width, height: height)
                 .glassEffect(.clear.tint(theme.accent.opacity(dragging ? 0.045 : 0.012)).interactive(), in: .capsule)
                 .glassEffectID("selection-lens", in: namespace)
                 .glassEffectTransition(.matchedGeometry)
                 .shadow(color: .black.opacity(dragging ? 0.32 : 0.1), radius: dragging ? 10 : 3, y: dragging ? 5 : 1)
         } else {
-            Text(title).font(.system(size: small ? 10 : 12, weight: .bold)).foregroundStyle(.white)
-                .frame(width: width, height: height).background(GlassSurface(highlighted: true))
+            GlassSurface(highlighted: true).frame(width: width, height: height)
         }
     }
 }
@@ -91,7 +87,9 @@ struct ClearGlassButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.font(.system(size: 11, weight: .medium))
             .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(minHeight: 36)
             .modifier(ClearGlassControl())
+            .contentShape(Rectangle())
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.8), value: configuration.isPressed)
     }

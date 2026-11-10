@@ -21,6 +21,8 @@ struct NativePlayerView: NSViewRepresentable {
 struct MiniPlayer: View {
     @ObservedObject var store: PlaybackStore
     let onExpand: () -> Void
+    @GestureState private var upwardDrag: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if let file = store.currentFile {
@@ -41,34 +43,37 @@ struct MiniPlayer: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(GlassPressStyle())
                     .accessibilityLabel("Show now playing: \(file.name)")
 
                     Button(action: store.previous) {
-                        Image(systemName: "backward.end.fill")
+                        Image(systemName: "backward.end.fill").frame(width: 40, height: 40)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
                     }
                     .disabled(!store.canGoPrevious)
                     .accessibilityLabel("Previous track")
 
                     Button(action: store.toggle) {
                         Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
-                            .frame(width: 22)
+                            .frame(width: 40, height: 40).modifier(ClearGlassControl()).contentShape(Rectangle())
                     }
                     .font(.system(size: 16))
                     .accessibilityLabel(store.isPlaying ? "Pause" : "Play")
 
                     Button(action: store.next) {
-                        Image(systemName: "forward.end.fill")
+                        Image(systemName: "forward.end.fill").frame(width: 40, height: 40)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
                     }
                     .disabled(!store.canGoNext)
                     .accessibilityLabel("Next track")
 
                     Button(action: onExpand) {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 40, height: 40)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
                     }
                     .accessibilityLabel("Expand player")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GlassPressStyle())
                 .font(.system(size: 14))
 
                 Slider(value: Binding(
@@ -82,6 +87,16 @@ struct MiniPlayer: View {
             .padding(.vertical, 12)
             .modifier(ClearGlassControl(radius: 18, panel: true))
             .padding(.horizontal, 14).padding(.vertical, 10)
+            .offset(y: reduceMotion ? 0 : upwardDrag)
+            .simultaneousGesture(DragGesture(minimumDistance: 14)
+                .updating($upwardDrag) { value, state, _ in
+                    if abs(value.translation.height) > abs(value.translation.width) {
+                        state = max(-24, min(0, value.translation.height * 0.18))
+                    }
+                }
+                .onEnded { value in
+                    if value.translation.height < -44 && abs(value.translation.height) > abs(value.translation.width) * 1.2 { onExpand() }
+                })
         }
     }
 }
@@ -96,7 +111,10 @@ struct NowPlayingView: View {
                 Text("Now Playing")
                     .font(.headline)
                 Spacer()
-                Button("Done") { dismiss() }
+                Button(action: { dismiss() }) {
+                    Text("Done").padding(.horizontal, 16).frame(height: 40)
+                        .modifier(ClearGlassControl()).contentShape(Rectangle())
+                }.buttonStyle(GlassPressStyle())
             }
 
             if let file = store.currentFile {
@@ -136,20 +154,26 @@ struct NowPlayingView: View {
                 }
 
                 HStack(spacing: 32) {
-                    Button(action: store.previous) { Image(systemName: "backward.end.fill") }
+                    Button(action: store.previous) {
+                        Image(systemName: "backward.end.fill").frame(width: 48, height: 48)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
+                    }
                         .disabled(!store.canGoPrevious)
                         .accessibilityLabel("Previous track")
                     Button(action: store.toggle) {
                         Image(systemName: store.isPlaying ? "pause.fill" : "play.fill")
-                            .frame(width: 30)
+                            .frame(width: 56, height: 56).modifier(ClearGlassControl()).contentShape(Rectangle())
                     }
                     .font(.system(size: 27))
                     .accessibilityLabel(store.isPlaying ? "Pause" : "Play")
-                    Button(action: store.next) { Image(systemName: "forward.end.fill") }
+                    Button(action: store.next) {
+                        Image(systemName: "forward.end.fill").frame(width: 48, height: 48)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
+                    }
                         .disabled(!store.canGoNext)
                         .accessibilityLabel("Next track")
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(GlassPressStyle())
                 .font(.system(size: 20))
 
                 HStack(spacing: 12) {

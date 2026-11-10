@@ -127,3 +127,36 @@ Design references include Apple's mobile Music guides and the BitChord upstream
 repository (read-only research; no third-party code or artwork was copied):
 https://support.apple.com/en-gb/guide/iphone/iph676daac9b/ios
 https://github.com/kushagrasinghx/BitChord
+
+## Version 1.1.1: navigation and interaction polish
+
+Both workspaces mount at startup and retain their view state. Page changes use a
+short slide/fade; inactive visualizer timelines pause. Downloader chrome is managed
+at the window root, without a bottom navigation inset. The titlebar stays transparent
+and its toolbar is hidden in Downloader mode.
+
+The selection lens contains no labels: stationary text is drawn separately above
+native clear glass. Mouse-down expands the lens before dragging; bounded edge drag
+adds small elastic offsets. Expanded player collapse has a 72-point hit target.
+Player controls and Settings use larger, consistent glass hit areas. Audio bands
+use adjacent-frame interpolation and temporal smoothing; artwork/wallpaper pools
+move on a 24 fps backdrop, with static positions under Reduce Motion.
+
+Downloader file rows now show artwork, media details, folder counts, and glass
+hover/selection. Filtering clears selections; hidden files cannot remain action
+targets, and empty results are displayed over the list. Space toggles playback in
+the active workspace outside text editing and dialogs; autorepeat is consumed.
+
+The visualizer fixture checks and complete Swift source typecheck passed during
+this polish. A packaged UI check verified the top navigation, full-bleed Downloader,
+right-pane player expansion, and collapsing by clicking the outer glass button
+away from its chevron. Existing media was preserved.
+
+The Downloader also provides a compact playback bar with transport and seeking;
+files play there without switching workspaces. Its custom row selection replaces
+native List selection so only the rounded glass row is highlighted. A first-run,
+replayable guided tour explains downloading, files, playback, and appearance with
+animated cards and a reduced-motion alternative.
+
+Packaged keyboard checks confirmed Space paused in Player, resumed from Downloader,
+and remained a literal space while typing a two-word search without pausing audio.

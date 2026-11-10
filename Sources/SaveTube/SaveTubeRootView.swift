@@ -9,53 +9,70 @@ private enum SaveTubePage: String, CaseIterable {
 struct SaveTubeRootView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
-    @ObservedObject private var playback = PlaybackStore.shared
     @StateObject private var homeState = DownloadHomeState()
     @State private var page: SaveTubePage = .downloader
+    @AppStorage("SaveTube.tourCompleted.v1") private var tourCompleted = false
+    @State private var showTour = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        Group {
-            if page == .downloader {
-                DownloadHomeView(library: library, engine: engine, state: homeState) { file in
-                    playback.play(file, queue: library.files)
-                    page = .player
+        ZStack {
+            ZStack {
+                DownloadHomeView(library: library, engine: engine, state: homeState,
+                                 isActive: page == .downloader && !showTour,
+                                 switchToPlayer: showPlayer) { file in
+                    PlaybackStore.shared.play(file, queue: library.files)
+                    showPlayer()
                 }
-            } else {
-                NativeLibraryView(library: library, engine: engine, navigationBar: AnyView(bottomNavigation))
+                .opacity(page == .downloader ? 1 : 0)
+                .offset(x: reduceMotion || page == .downloader ? 0 : -14)
+                .disabled(page != .downloader)
+                .allowsHitTesting(page == .downloader)
+                .accessibilityHidden(page != .downloader)
+
+                NativeLibraryView(library: library, engine: engine,
+                                  isActive: page == .player && !showTour,
+                                  switchToDownloader: { page = .downloader })
+                    .opacity(page == .player ? 1 : 0)
+                    .offset(x: reduceMotion || page == .player ? 0 : 14)
+                    .disabled(page != .player)
+                    .allowsHitTesting(page == .player)
+                    .accessibilityHidden(page != .player)
+            }
+            .disabled(showTour)
+            .accessibilityHidden(showTour)
+
+            if showTour {
+                OnboardingTour(onFinish: finishTour)
+                    .transition(.opacity)
+                    .zIndex(2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if page == .downloader { bottomNavigation }
+        .background(WindowChrome(downloaderVisible: page == .downloader))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: page)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showTour)
+        .onAppear { if !tourCompleted { page = .downloader; showTour = true } }
+        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeDownloader)) { _ in if !showTour { page = .downloader } }
+        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubePlayer)) { _ in if !showTour { showPlayer() } }
+        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeTour)) { _ in
+            page = .downloader
+            showTour = true
         }
-        .background(Color.black)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: page)
-        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeDownloader)) { _ in page = .downloader }
-        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubePlayer)) { _ in page = .player }
-    }
-    private var bottomNavigation: some View {
-            HStack {
-                Spacer(minLength: 0)
-                SegmentPill(values: SaveTubePage.allCases.map(\.rawValue), selection: Binding(
-                    get: { page.rawValue },
-                    set: { value in
-                        guard let next = SaveTubePage(rawValue: value) else { return }
-                        page = next
-                    }
-                ))
-                .frame(width: 280, height: 48)
-                .padding(6)
-                .modifier(ClearGlassControl(radius: 32, panel: true))
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 12)
-            .background(Color.black.opacity(0.68))
     }
 
+    private func showPlayer() {
+        page = .player
+    }
+
+    private func finishTour() {
+        tourCompleted = true
+        showTour = false
+    }
 }
 
 extension Notification.Name {
     static let showSaveTubeDownloader = Notification.Name("SaveTube.showDownloader")
     static let showSaveTubePlayer = Notification.Name("SaveTube.showPlayer")
+    static let showSaveTubeTour = Notification.Name("SaveTube.showTour")
 }

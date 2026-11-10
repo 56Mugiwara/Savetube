@@ -20,7 +20,8 @@ private enum LibraryDestination: Hashable {
 struct NativeLibraryView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
-    var navigationBar: AnyView? = nil
+    var isActive = true
+    var switchToDownloader: (() -> Void)? = nil
     @ObservedObject private var playback = PlaybackStore.shared
     @ObservedObject private var theme = ThemeStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -42,7 +43,7 @@ struct NativeLibraryView: View {
     private var motion: Animation? { reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86) }
     private var accent: Color { theme.sourceDescription == "Monochrome" ? Color(red: 0.98, green: 0.18, blue: 0.29) : theme.accent }
     private var activeFolder: String? { if case .folder(let name) = destination { return name }; return nil }
-    private var selectedFile: MediaFile? { library.files.first { $0.id == selection } }
+    private var selectedFile: MediaFile? { visibleFiles.first { $0.id == selection } }
     private var visibleFiles: [MediaFile] {
         let filtered = library.files.filter { file in
             let matchesDestination: Bool
@@ -69,9 +70,11 @@ struct NativeLibraryView: View {
             sidebar
                 .navigationSplitViewColumnWidth(min: 175, ideal: 205, max: 260)
         } detail: {
-            Group {
+            ZStack {
                 if showPlayer {
-                    DetailNowPlayingView(store: playback) { withAnimation(motion) { showPlayer = false } }
+                    DetailNowPlayingView(store: playback, isActive: isActive) { withAnimation(motion) { showPlayer = false } }
+                        .transition(reduceMotion ? .opacity : .move(edge: .bottom))
+                        .zIndex(1)
                 } else {
                     detail.safeAreaInset(edge: .bottom, spacing: 0) {
                         if playback.currentFile != nil {
@@ -79,10 +82,30 @@ struct NativeLibraryView: View {
                                 .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
+                    .transition(.opacity).zIndex(0)
                 }
-            }.frame(maxWidth: .infinity, maxHeight: .infinity)
-                .safeAreaInset(edge: .bottom, spacing: 0) { if let navigationBar { navigationBar } }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+                .animation(motion, value: showPlayer)
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                if let switchToDownloader {
+                    Button("Downloader", action: switchToDownloader)
+                        .buttonStyle(.bordered).help("Open Downloader (Command-1)")
+                }
+            }
+        }
+        .background(LibraryKeyboard(onMove: { _ in false }, onOpen: {
+            guard isActive && !naming && !deleting && !showSettings && !showDownloads,
+                  let selectedFile, visibleFiles.contains(where: { $0.id == selectedFile.id }) else { return false }
+            playback.play(selectedFile, queue: visibleFiles)
+            return true
+        }, onEscape: { false }, onSpace: {
+            guard isActive && !naming && !deleting && !showSettings && !showDownloads,
+                  library.lastError == nil, playback.currentFile != nil else { return false }
+            playback.toggle()
+            return true
+        }).frame(width: 0, height: 0))
         .tint(accent)
         .background {
             if theme.glassBackground { WindowBackdrop(glass: true) }
@@ -91,13 +114,14 @@ struct NativeLibraryView: View {
         .overlay { settingsPanel }
         .sheet(isPresented: $naming) { namingPanel }
         .sheet(isPresented: $deleting) { deletionPanel }
-        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in showSettings = true }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in library.refresh() }
-        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in library.refresh() }
+        .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in if isActive { showSettings = true } }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in if isActive { library.refresh() } }
+        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive { library.refresh() } }
         .onChange(of: destination) { _ in selection = nil; showPlayer = false }
+        .onChange(of: query) { _ in selection = nil }
         .animation(motion, value: playback.currentFile?.id)
         .animation(motion, value: showSettings)
-        .alert("Library", isPresented: Binding(get: { library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
+        .alert("Library", isPresented: Binding(get: { isActive && library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
             Button("OK") { library.lastError = nil }
         } message: { Text(library.lastError ?? "") }
     }
@@ -214,10 +238,6 @@ struct NativeLibraryView: View {
         .listStyle(.inset).scrollContentBackground(.hidden)
         .onDeleteCommand { if let selectedFile { requestDelete(file: selectedFile) } }
         .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, into: activeFolder) }
-        .background(LibraryKeyboard(onMove: { _ in false }, onOpen: {
-            guard !naming && !deleting && !showSettings, let selectedFile else { return false }
-            playback.play(selectedFile, queue: visibleFiles); return true
-        }, onEscape: { false }).frame(width: 0, height: 0))
     }
     private func mediaRow(_ file: MediaFile) -> some View {
         HStack(spacing: 14) {

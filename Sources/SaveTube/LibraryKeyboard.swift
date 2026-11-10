@@ -6,6 +6,7 @@ struct LibraryKeyboard: NSViewRepresentable {
     var onMove: (Int) -> Bool
     var onOpen: () -> Bool
     var onEscape: () -> Bool
+    var onSpace: (() -> Bool)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeNSView(context: Context) -> NSView {
@@ -18,6 +19,7 @@ struct LibraryKeyboard: NSViewRepresentable {
         context.coordinator.onMove = onMove
         context.coordinator.onOpen = onOpen
         context.coordinator.onEscape = onEscape
+        context.coordinator.onSpace = onSpace
     }
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.remove() }
 
@@ -26,7 +28,9 @@ struct LibraryKeyboard: NSViewRepresentable {
         var onMove: ((Int) -> Bool)?
         var onOpen: (() -> Bool)?
         var onEscape: (() -> Bool)?
+        var onSpace: (() -> Bool)?
         private var monitor: Any?
+        private var spaceConsumed = false
         func install() {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.view?.window,
@@ -39,6 +43,10 @@ struct LibraryKeyboard: NSViewRepresentable {
                 case 126: return self.onMove?(-1) == true ? nil : event
                 case 125: return self.onMove?(1) == true ? nil : event
                 case 36, 76: return self.onOpen?() == true ? nil : event
+                case 49:
+                    if event.isARepeat { return self.spaceConsumed ? nil : event }
+                    self.spaceConsumed = self.onSpace?() == true
+                    return self.spaceConsumed ? nil : event
                 default: return event
                 }
             }

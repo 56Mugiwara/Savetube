@@ -5,6 +5,7 @@ import SwiftUI
 /// Expanded playback stays in the split view's detail column, never over its sidebar.
 struct DetailNowPlayingView: View {
     @ObservedObject var store: PlaybackStore
+    var isActive = true
     let onCollapse: () -> Void
     @ObservedObject private var palette = MediaPaletteStore.shared
     @ObservedObject private var spectrum = AudioVisualizationStore.shared
@@ -15,7 +16,7 @@ struct DetailNowPlayingView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                VisualizerBackdrop(store: store, spectrum: spectrum, colors: palette.colors)
+                VisualizerBackdrop(store: store, spectrum: spectrum, colors: palette.colors, isActive: isActive)
                 VStack(spacing: 0) {
                     topBar.padding(.horizontal, 24).padding(.top, 14).padding(.bottom, 8)
                     if showingQueue { queue }
@@ -33,8 +34,12 @@ struct DetailNowPlayingView: View {
     }
     private var topBar: some View {
         HStack {
-            Button(action: onCollapse) { Image(systemName: "chevron.down").frame(width: 40, height: 36) }
-                .buttonStyle(ClearGlassButtonStyle()).help("Back to library").accessibilityLabel("Collapse player")
+            Button(action: onCollapse) {
+                Image(systemName: "chevron.down").font(.system(size: 16, weight: .semibold))
+                    .frame(width: 72, height: 72)
+                    .modifier(ClearGlassControl())
+                    .contentShape(Rectangle())
+            }.buttonStyle(GlassPressStyle()).help("Back to library").accessibilityLabel("Collapse player")
             Spacer()
             VStack(spacing: 3) {
                 Text(showingQueue ? "Playing Next" : "Now Playing").font(.system(size: 12, weight: .semibold))
@@ -47,7 +52,10 @@ struct DetailNowPlayingView: View {
                     Button("Open With Default App") { NSWorkspace.shared.open(file.url) }
                 }
                 Button("Stop Playback") { store.stop(); onCollapse() }
-            } label: { Image(systemName: "ellipsis").frame(width: 40, height: 36) }
+            } label: {
+                Image(systemName: "ellipsis").frame(width: 52, height: 52)
+                    .modifier(ClearGlassControl()).contentShape(Rectangle())
+            }
                 .menuStyle(.borderlessButton).fixedSize().help("More playback actions")
         }
     }
@@ -77,20 +85,21 @@ struct DetailNowPlayingView: View {
                             Spacer(minLength: 0)
                             Button(action: store.toggleFavorite) {
                                 Image(systemName: store.favoriteIDs.contains(file.id) ? "star.fill" : "star")
-                                    .font(.system(size: 19)).frame(width: 42, height: 42)
-                            }.buttonStyle(.plain).foregroundStyle(store.favoriteIDs.contains(file.id) ? accent : .white.opacity(0.8))
+                                    .font(.system(size: 19)).frame(width: 48, height: 48)
+                                    .modifier(ClearGlassControl()).contentShape(Rectangle())
+                            }.buttonStyle(GlassPressStyle()).foregroundStyle(store.favoriteIDs.contains(file.id) ? accent : .white.opacity(0.8))
                                 .accessibilityLabel(store.favoriteIDs.contains(file.id) ? "Remove favorite" : "Favorite track")
                         }
                         progress
                         HStack(spacing: compact ? 32 : 44) {
-                            Button(action: store.previous) { Image(systemName: "backward.fill").font(.system(size: 25)).frame(width: 52, height: 52) }
+                            Button(action: store.previous) { Image(systemName: "backward.fill").font(.system(size: 25)).frame(width: 52, height: 52).modifier(ClearGlassControl()).contentShape(Rectangle()) }
                                 .disabled(!store.canGoPrevious).accessibilityLabel("Previous track")
-                            Button(action: store.toggle) { Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 40)).frame(width: 64, height: 60) }
+                            Button(action: store.toggle) { Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 40)).frame(width: 64, height: 60).modifier(ClearGlassControl()).contentShape(Rectangle()) }
                                 .accessibilityLabel(store.isPlaying ? "Pause" : "Play")
-                            Button(action: store.next) { Image(systemName: "forward.fill").font(.system(size: 25)).frame(width: 52, height: 52) }
+                            Button(action: store.next) { Image(systemName: "forward.fill").font(.system(size: 25)).frame(width: 52, height: 52).modifier(ClearGlassControl()).contentShape(Rectangle()) }
                                 .disabled(!store.canGoNext).accessibilityLabel("Next track")
-                        }.buttonStyle(.plain).frame(maxWidth: .infinity)
-                        AudioSpectrumView(store: store, spectrum: spectrum, colors: palette.colors)
+                        }.buttonStyle(GlassPressStyle()).frame(maxWidth: .infinity)
+                        AudioSpectrumView(store: store, spectrum: spectrum, colors: palette.colors, isActive: isActive)
                             .frame(height: compact ? 42 : 62).accessibilityLabel("Audio-reactive visualizer")
                         secondaryControls
                         if let error = store.error { Text(error).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center) }
@@ -98,7 +107,11 @@ struct DetailNowPlayingView: View {
                 } else {
                     Image(systemName: "music.note").font(.system(size: 50, weight: .ultraLight)).padding(.top, 70)
                     Text("Nothing Playing").font(.title2.bold())
-                    Button("Return to Library", action: onCollapse).buttonStyle(.bordered)
+                    Button(action: onCollapse) {
+                        Text("Return to Library")
+                            .padding(.horizontal, 18).frame(height: 44)
+                            .modifier(ClearGlassControl()).contentShape(Rectangle())
+                    }.buttonStyle(GlassPressStyle())
                 }
             }.padding(.horizontal, 32).padding(.bottom, 24).frame(maxWidth: .infinity)
         }.scrollIndicators(.hidden)
@@ -117,14 +130,15 @@ struct DetailNowPlayingView: View {
     private var secondaryControls: some View {
         VStack(spacing: 18) {
             HStack(spacing: 28) {
-                Button(action: store.toggleShuffle) { Image(systemName: "shuffle").frame(width: 36, height: 32) }
+                Button(action: store.toggleShuffle) { Image(systemName: "shuffle").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }
                     .foregroundStyle(store.shuffleEnabled ? accent : .white.opacity(0.7)).accessibilityLabel(store.shuffleEnabled ? "Disable shuffle" : "Enable shuffle")
-                Button(action: store.cycleRepeat) { Image(systemName: store.repeatMode == .one ? "repeat.1" : "repeat").frame(width: 36, height: 32) }
+                Button(action: store.cycleRepeat) { Image(systemName: store.repeatMode == .one ? "repeat.1" : "repeat").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }
                     .foregroundStyle(store.repeatMode == .off ? .white.opacity(0.7) : accent).accessibilityLabel(store.repeatMode == .off ? "Repeat off" : store.repeatMode == .all ? "Repeat all" : "Repeat one")
                 Spacer()
-                PlaybackRoutePicker(player: store.player).frame(width: 34, height: 32).help("Choose audio output")
-                Button { showingQueue = true } label: { Image(systemName: "list.bullet").frame(width: 36, height: 32) }.accessibilityLabel("Playing Next queue")
-            }.font(.system(size: 18)).buttonStyle(.plain)
+                PlaybackRoutePicker(player: store.player).frame(width: 44, height: 44)
+                    .modifier(ClearGlassControl()).contentShape(Rectangle()).help("Choose audio output")
+                Button { showingQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }.accessibilityLabel("Playing Next queue")
+            }.font(.system(size: 18)).buttonStyle(GlassPressStyle())
             HStack(spacing: 12) {
                 Image(systemName: "speaker.fill").font(.system(size: 11))
                 Slider(value: $store.volume, in: 0...1).tint(.white.opacity(0.75)).accessibilityLabel("Volume")
@@ -134,7 +148,11 @@ struct DetailNowPlayingView: View {
     }
     private var queue: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Button { showingQueue = false } label: { Label("Now Playing", systemImage: "chevron.left") }.buttonStyle(.plain).padding(.horizontal, 26)
+            Button { showingQueue = false } label: {
+                Label("Now Playing", systemImage: "chevron.left")
+                    .padding(.horizontal, 16).frame(height: 44)
+                    .modifier(ClearGlassControl()).contentShape(Rectangle())
+            }.buttonStyle(GlassPressStyle()).padding(.horizontal, 26)
             List {
                 ForEach(store.queue) { file in
                     HStack(spacing: 12) {
@@ -145,7 +163,7 @@ struct DetailNowPlayingView: View {
                         }
                         Spacer()
                         if file.id == store.currentFile?.id { Image(systemName: "waveform").foregroundStyle(accent) }
-                        else { Button { store.removeFromQueue(file) } label: { Image(systemName: "minus.circle") }.buttonStyle(.plain).help("Remove from queue") }
+                        else { Button { store.removeFromQueue(file) } label: { Image(systemName: "minus.circle").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }.buttonStyle(GlassPressStyle()).help("Remove from queue") }
                     }.padding(.vertical, 6).contentShape(Rectangle())
                         .onTapGesture(count: 2) { store.play(file, queue: store.queue); showingQueue = false }
                 }.onMove(perform: store.moveQueueItems)
@@ -172,16 +190,18 @@ private struct AudioSpectrumView: View {
     @ObservedObject var store: PlaybackStore
     @ObservedObject var spectrum: AudioVisualizationStore
     let colors: [Color]
+    let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30, paused: !store.isPlaying || reduceMotion)) { _ in
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: !isActive || !store.isPlaying || reduceMotion)) { _ in
             let values = spectrum.bands(at: store.player.currentTime().seconds)
             Canvas { context, size in
                 let spacing: CGFloat = 4
                 let width = max(1, (size.width - CGFloat(values.count - 1) * spacing) / CGFloat(values.count))
                 let gradient = Gradient(colors: colors.isEmpty ? [.white] : colors)
                 for index in values.indices {
-                    let height = max(3, CGFloat(values[index]) * size.height)
+                    let energy = pow(max(0, Double(values[index])), 0.76)
+                    let height = max(3, CGFloat(min(1, energy * 1.18)) * size.height)
                     let rect = CGRect(x: CGFloat(index) * (width + spacing), y: (size.height - height) / 2, width: width, height: height)
                     context.fill(Path(roundedRect: rect, cornerRadius: width / 2), with: .linearGradient(gradient, startPoint: .init(x: 0, y: size.height), endPoint: .init(x: size.width, y: 0)))
                 }
@@ -194,20 +214,27 @@ private struct VisualizerBackdrop: View {
     @ObservedObject var store: PlaybackStore
     @ObservedObject var spectrum: AudioVisualizationStore
     let colors: [Color]
+    let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         ZStack {
             Color(white: 0.045)
-            TimelineView(.animation(minimumInterval: 1 / 24, paused: !store.isPlaying || reduceMotion)) { _ in
+            TimelineView(.animation(minimumInterval: 1 / 24, paused: !isActive || reduceMotion)) { timeline in
                 let bands = spectrum.bands(at: store.player.currentTime().seconds)
+                let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
                 Canvas { context, size in
-                    context.addFilter(.blur(radius: 70))
-                    let radius = max(size.width, size.height) * 0.72
+                    context.addFilter(.blur(radius: 66))
+                    let baseRadius = max(size.width, size.height) * 0.58
                     for index in colors.indices.prefix(5) {
+                        let phase = Double(index) * 1.71
                         let strength = reduceMotion ? 0 : Double(bands[(index * 5) % max(1, bands.count)])
-                        let x = size.width * (0.05 + CGFloat(index % 3) * 0.38) + CGFloat(strength) * 70
-                        let y = size.height * (0.05 + CGFloat(index % 2) * 0.52) - CGFloat(strength) * 45
-                        context.fill(Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius / 2, width: radius, height: radius)), with: .color(colors[index].opacity(0.35 + strength * 0.18)))
+                        let orbitX = sin(time * (reduceMotion ? 0 : 0.22 + Double(index) * 0.018) + phase) * 0.32
+                        let orbitY = cos(time * (reduceMotion ? 0 : 0.18 + Double(index) * 0.015) + phase * 1.3) * 0.34
+                        let x = size.width * CGFloat(0.50 + orbitX) + CGFloat(strength) * 30
+                        let y = size.height * CGFloat(0.49 + orbitY) - CGFloat(strength) * 24
+                        let breathing = reduceMotion ? 0 : sin(time * 0.20 + phase) * 0.10
+                        let radius = baseRadius * CGFloat(1 + breathing + strength * 0.16)
+                        context.fill(Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius / 2, width: radius, height: radius)), with: .color(colors[index].opacity(0.48 + strength * 0.12)))
                     }
                 }
             }
