@@ -1,0 +1,22 @@
+name: Build macOS app
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF_TYPE" != tag ]]; then VERSION=1.0.0; fi
+          VERSION="$VERSION" ./scripts/build-app.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SaveTube-macos-arm64
+          path: |
+            dist/*.zip
+            dist/*.sha256
