@@ -53,7 +53,7 @@ struct DetailNowPlayingView: View {
                     Image(systemName: "ellipsis").frame(width: 44, height: 44)
                         .modifier(ClearGlassControl(radius: 22)).padding(4).contentShape(Rectangle())
                 }
-                .menuStyle(.borderlessButton).fixedSize().help("More playback actions")
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More playback actions")
             }
             VStack(spacing: 3) {
                 Text(showingQueue ? "Playing Next" : "Now Playing").font(.system(size: 12, weight: .semibold))
@@ -103,8 +103,15 @@ struct DetailNowPlayingView: View {
                             Button(action: store.next) { Image(systemName: "forward.fill").font(.system(size: 22)).frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }
                                 .disabled(!store.canGoNext).accessibilityLabel("Next track")
                         }.buttonStyle(GlassPressStyle()).frame(maxWidth: .infinity)
-                        AudioSpectrumView(store: store, spectrum: spectrum, colors: palette.colors, isActive: isActive)
-                            .frame(height: compact ? 42 : 62).accessibilityLabel("Audio-reactive visualizer")
+                        VStack(spacing: 4) {
+                            AudioSpectrumView(store: store, spectrum: spectrum, colors: palette.colors, isActive: isActive)
+                                .frame(height: compact ? 42 : 62).accessibilityLabel("Audio-reactive visualizer")
+                            if let error = spectrum.error {
+                                Text("Visualizer unavailable for this file").font(.caption2).foregroundStyle(.white.opacity(0.65)).help(error)
+                            } else if spectrum.loading {
+                                Text("Preparing visualizer…").font(.caption2).foregroundStyle(.white.opacity(0.65))
+                            }
+                        }
                         secondaryControls
                         if let error = store.error { Text(error).font(.caption).foregroundStyle(.orange).multilineTextAlignment(.center) }
                     }.frame(maxWidth: 600)
@@ -213,15 +220,20 @@ private struct PlaybackRoutePicker: NSViewRepresentable {
 }
 
 private struct AudioSpectrumView: View {
-    let store: PlaybackStore
+    @ObservedObject var store: PlaybackStore
     @ObservedObject var spectrum: AudioVisualizationStore
     let colors: [Color]
     let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 60, paused: !isActive || !store.isPlaying || reduceMotion)) { _ in
-            let values = spectrum.bands(at: store.player.currentTime().seconds)
-            Canvas { context, size in
+        let referenceDate = Date()
+        let referenceTime = store.player.currentTime().seconds
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: !isActive || !store.isPlaying || reduceMotion)) { timeline in
+            // Project the sampled playhead onto this display frame. Keeping the clock
+            // observation here also redraws after seeks without invalidating the player pane.
+            let elapsed = store.isPlaying && !reduceMotion ? max(0, timeline.date.timeIntervalSince(referenceDate)) : 0
+            let values = spectrum.bands(at: referenceTime + elapsed)
+            Canvas(rendersAsynchronously: true) { context, size in
                 let spacing: CGFloat = 4
                 let width = max(1, (size.width - CGFloat(values.count - 1) * spacing) / CGFloat(values.count))
                 let gradient = Gradient(colors: colors.isEmpty ? [.white] : colors)
@@ -238,35 +250,45 @@ private struct AudioSpectrumView: View {
     }
 }
 
+/// Soft colour fields cover the whole pane: no isolated discs or black empty corners.
 private struct VisualizerBackdrop: View {
     let store: PlaybackStore
     @ObservedObject var spectrum: AudioVisualizationStore
     let colors: [Color]
     let isActive: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        ZStack {
-            Color(white: 0.045)
-            TimelineView(.animation(minimumInterval: 1 / 60, paused: !isActive || reduceMotion)) { timeline in
-                let bands = spectrum.bands(at: store.player.currentTime().seconds)
-                let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
-                Canvas { context, size in
-                    context.addFilter(.blur(radius: 66))
-                    let baseRadius = max(size.width, size.height) * 0.85
-                    for index in colors.indices.prefix(5) {
-                        let phase = Double(index) * 1.71
-                        let strength = reduceMotion ? 0 : Double(bands[(index * 5) % max(1, bands.count)])
-                        let orbitX = sin(time * (reduceMotion ? 0 : 0.22 + Double(index) * 0.018) + phase) * 0.32
-                        let orbitY = cos(time * (reduceMotion ? 0 : 0.18 + Double(index) * 0.015) + phase * 1.3) * 0.34
-                        let x = size.width * CGFloat(0.50 + orbitX) + CGFloat(strength) * 30
-                        let y = size.height * CGFloat(0.49 + orbitY) - CGFloat(strength) * 24
-                        let breathing = reduceMotion ? 0 : sin(time * 0.20 + phase) * 0.10
-                        let radius = baseRadius * CGFloat(1 + breathing + strength * 0.16)
-                        context.fill(Path(ellipseIn: CGRect(x: x - radius / 2, y: y - radius / 2, width: radius, height: radius)), with: .color(colors[index].opacity(0.70 + strength * 0.12)))
-                    }
+        let palette = colors.isEmpty ? [Color(white: 0.22)] : colors
+        TimelineView(.animation(minimumInterval: 1 / 60, paused: !isActive || reduceMotion)) { timeline in
+            let time = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
+            let bands = spectrum.bands(at: store.player.currentTime().seconds)
+            Canvas(opaque: true, rendersAsynchronously: true) { context, size in
+                let bounds = Path(CGRect(origin: .zero, size: size))
+                // A coloured foundation prevents the pools from revealing a black void.
+                context.fill(bounds, with: .linearGradient(
+                    Gradient(colors: [palette[0], palette[palette.count / 2], palette[palette.count - 1]]),
+                    startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)))
+                for index in 0..<min(4, palette.count) {
+                    let phase = Double(index) * 2.1
+                    let energy = reduceMotion ? 0 : Double(bands[(index * 5) % max(1, bands.count)])
+                    let x = 0.5 + sin(time * 0.075 + phase) * 0.44
+                    let y = 0.5 + cos(time * 0.063 + phase * 1.2) * 0.42
+                    let radius = max(size.width, size.height) * CGFloat(0.82 + sin(time * 0.09 + phase) * 0.08 + energy * 0.05)
+                    let gradient = Gradient(stops: [
+                        .init(color: palette[index].opacity(0.90), location: 0),
+                        .init(color: palette[index].opacity(0.48), location: 0.44),
+                        .init(color: palette[index].opacity(0), location: 1)
+                    ])
+                    context.fill(bounds, with: .radialGradient(gradient,
+                        center: CGPoint(x: size.width * x, y: size.height * y),
+                        startRadius: 0, endRadius: radius))
                 }
+                // Keep white labels readable without dimming the entire colour canvas.
+                context.fill(bounds, with: .linearGradient(
+                    Gradient(colors: [.black.opacity(0.08), .black.opacity(0.26)]),
+                    startPoint: .zero, endPoint: CGPoint(x: 0, y: size.height)))
             }
-            LinearGradient(colors: [.clear, .black.opacity(0.24)], startPoint: .center, endPoint: .bottom)
         }.allowsHitTesting(false)
     }
 }

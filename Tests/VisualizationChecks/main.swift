@@ -18,6 +18,7 @@ struct VisualizationChecks {
         let tone = MediaFile(url: root.appendingPathComponent("tone.mp3"))
         let movie = MediaFile(url: root.appendingPathComponent("tone.mp4"))
         let pulse = MediaFile(url: root.appendingPathComponent("pulse.mp3"))
+        let longTone = MediaFile(url: root.appendingPathComponent("long-tone.mp3"))
 
         store.prepare(file: silent)
         try await untilReady(store)
@@ -49,7 +50,20 @@ struct VisualizationChecks {
         guard !store.loading, store.bands(at: 0.8).allSatisfy({ $0 == 0 }) else {
             throw CheckFailure(description: "Cached silence was not restored")
         }
-        print("PASS visualizer: MP3 silence, MP3 tone spectrum, MP4 audio, timeline response, cached file switch")
+
+        store.prepare(file: longTone)
+        let progressDeadline = Date().addingTimeInterval(10)
+        while store.loading && (store.bands(at: 1.5).max() ?? 0) <= 0.2 && Date() < progressDeadline {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        guard store.loading, (store.bands(at: 1.5).max() ?? 0) > 0.2 else {
+            throw CheckFailure(description: "Long MP3 did not publish usable bands before analysis completed")
+        }
+        store.prepare(file: silent)
+        guard !store.loading, store.bands(at: 1.5).allSatisfy({ $0 == 0 }) else {
+            throw CheckFailure(description: "Switching files retained partial bands from the previous file")
+        }
+        print("PASS visualizer: MP3 silence and tone, MP4 audio, timeline response, progressive long-file analysis, cached file switch")
     }
 
     @MainActor

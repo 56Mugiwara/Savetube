@@ -52,7 +52,10 @@ final class MediaPaletteStore: ObservableObject {
                 self.sourceDescription = result.source
             } else {
                 let theme = ThemeStore.shared
-                self.colors = [theme.accent, theme.secondary, theme.surface, theme.onSurface, theme.accent]
+                // onSurface is commonly white and becomes an oversized bright blob
+                // in the visualizer. Keep the fallback colors in the dark theme range.
+                let fallback = [theme.accent, theme.secondary, theme.surface, theme.accent, theme.secondary]
+                self.colors = fallback.map { Self.darkThemeColor($0) }
                 self.sourceDescription = "Theme colors"
             }
         }
@@ -188,31 +191,95 @@ final class MediaPaletteStore: ObservableObject {
         }
         guard didDraw else { return [] }
 
-        var bins: [Int: (count: Int, r: Int, g: Int, b: Int, score: Double)] = [:]
+        var bins: [Int: (count: Int, r: Int, g: Int, b: Int)] = [:]
         for i in stride(from: 0, to: pixels.count, by: bytesPerPixel) {
             let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2]), a = Int(pixels[i + 3])
             guard a > 160 else { continue }
-            let high = max(r, max(g, b)), low = min(r, min(g, b))
-            let saturation = Double(high - low) / Double(max(high, 1))
-            let brightness = Double(high) / 255
             let index = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4)
-            // Saturation helps retain small vivid details; brightness weighting keeps
-            // nearly black pixels from swallowing the palette.
-            let score = 0.45 + saturation * 1.8 + min(brightness, 0.65) * 0.35
             if var bin = bins[index] {
-                bin.count += 1; bin.r += r; bin.g += g; bin.b += b; bin.score += score
+                bin.count += 1; bin.r += r; bin.g += g; bin.b += b
                 bins[index] = bin
-            } else { bins[index] = (1, r, g, b, score) }
+            } else { bins[index] = (1, r, g, b) }
         }
-        let picked = bins.values.sorted { $0.score > $1.score }.prefix(5)
-        return picked.map { bin in
-            let r = Double(bin.r) / Double(bin.count) / 255
-            let g = Double(bin.g) / Double(bin.count) / 255
-            let b = Double(bin.b) / Double(bin.count) / 255
-            // Keep accent hue while bringing every role into a dark UI range.
-            let peak = max(r, max(g, b))
-            let scale = peak > 0 ? min(0.72, max(0.42, 0.58 / peak)) : 1
-            return RGB(r: min(1, r * scale), g: min(1, g * scale), b: min(1, b * scale))
+        let candidates: [Candidate] = bins.values.map { bin in
+            let count = Double(bin.count)
+            let red = Double(bin.r) / count / 255
+            let green = Double(bin.g) / count / 255
+            let blue = Double(bin.b) / count / 255
+            let color = RGB(r: red, g: green, b: blue)
+            return Candidate(rgb: color, count: bin.count, hsv: hsv(color))
+        }.sorted { a, b in
+            // Population leads; a modest saturation bonus lets meaningful accents
+            // survive without allowing tiny specks to dominate the palette.
+            Double(a.count) * (0.8 + a.hsv.s * 0.45) > Double(b.count) * (0.8 + b.hsv.s * 0.45)
         }
+
+        var picked: [(rgb: RGB, hsv: HSV)] = []
+        for candidate in candidates {
+            guard picked.allSatisfy({ distance(candidate.hsv, $0.hsv) >= 0.16 }) else { continue }
+            picked.append((candidate.rgb, candidate.hsv))
+            if picked.count == 5 { break }
+        }
+
+        // A single-color or grayscale cover still needs several useful roles. Add
+        // luminance variants of its strongest colors rather than repeating bins.
+        if picked.isEmpty { picked.append((RGB(r: 0.25, g: 0.25, b: 0.25), HSV(h: 0, s: 0, v: 0.25))) }
+        let seeds = picked
+        let variants = [0.42, 0.60, 0.31, 0.52, 0.36]
+        while picked.count < 5 {
+            let index = picked.count - seeds.count
+            let seed = seeds[index % seeds.count]
+            let hsv = HSV(h: seed.hsv.h, s: seed.hsv.s, v: variants[index % variants.count])
+            picked.append((rgb(hsv), hsv))
+        }
+        return picked.map { normalize($0.hsv) }
+    }
+
+    private struct HSV { let h: Double; let s: Double; let v: Double }
+    private struct Candidate { let rgb: RGB; let count: Int; let hsv: HSV }
+
+    nonisolated private static func hsv(_ color: RGB) -> HSV {
+        let high = max(color.r, max(color.g, color.b)), low = min(color.r, min(color.g, color.b))
+        let delta = high - low
+        let hue: Double
+        if delta == 0 { hue = 0 }
+        else if high == color.r { hue = ((color.g - color.b) / delta).truncatingRemainder(dividingBy: 6) / 6 }
+        else if high == color.g { hue = ((color.b - color.r) / delta + 2) / 6 }
+        else { hue = ((color.r - color.g) / delta + 4) / 6 }
+        return HSV(h: hue < 0 ? hue + 1 : hue, s: high == 0 ? 0 : delta / high, v: high)
+    }
+
+    nonisolated private static func rgb(_ color: HSV) -> RGB {
+        let h = (color.h - floor(color.h)) * 6
+        let i = Int(floor(h)), f = h - floor(h)
+        let p = color.v * (1 - color.s), q = color.v * (1 - color.s * f), t = color.v * (1 - color.s * (1 - f))
+        switch i % 6 {
+        case 0: return RGB(r: color.v, g: t, b: p)
+        case 1: return RGB(r: q, g: color.v, b: p)
+        case 2: return RGB(r: p, g: color.v, b: t)
+        case 3: return RGB(r: p, g: q, b: color.v)
+        case 4: return RGB(r: t, g: p, b: color.v)
+        default: return RGB(r: color.v, g: p, b: q)
+        }
+    }
+
+    nonisolated private static func distance(_ a: HSV, _ b: HSV) -> Double {
+        let hueDelta = min(abs(a.h - b.h), 1 - abs(a.h - b.h))
+        return sqrt(pow(hueDelta * min(a.s, b.s) * 2, 2) + pow((a.s - b.s) * 0.65, 2) + pow((a.v - b.v) * 0.25, 2))
+    }
+
+    nonisolated private static func normalize(_ color: HSV) -> RGB {
+        let saturation = color.s < 0.08 ? 0 : min(0.82, max(0.38, color.s))
+        let brightness = min(0.66, max(0.29, color.v))
+        return rgb(HSV(h: color.h, s: saturation, v: brightness))
+    }
+
+    private static func darkThemeColor(_ color: Color) -> Color {
+        let nsColor = NSColor(color).usingColorSpace(.deviceRGB) ?? .gray
+        var hue: CGFloat = 0, saturation: CGFloat = 0, brightness: CGFloat = 0, alpha: CGFloat = 0
+        nsColor.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha)
+        let dark = NSColor(calibratedHue: hue, saturation: saturation < 0.08 ? 0 : min(0.82, max(0.38, saturation)),
+                           brightness: min(0.66, max(0.29, brightness)), alpha: 1)
+        return Color(dark)
     }
 }

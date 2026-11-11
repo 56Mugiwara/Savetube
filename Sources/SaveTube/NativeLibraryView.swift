@@ -21,6 +21,7 @@ struct NativeLibraryView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
     var isActive = true
+    var nativeTopInset: CGFloat = 0
     var switchToDownloader: (() -> Void)? = nil
     // PlaybackPresentation excludes the 4 Hz clock publisher, so a playing
     // track does not rebuild the whole library list on every tick.
@@ -125,6 +126,7 @@ struct NativeLibraryView: View {
             Button("OK") { library.lastError = nil }
         } message: { Text(library.lastError ?? "") }
         .ignoresSafeArea(.container, edges: .top)
+        .padding(.top, -nativeTopInset)
     }
     private var sidebar: some View {
         List(selection: $destination) {
@@ -180,7 +182,7 @@ struct NativeLibraryView: View {
                 }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 28).padding(.vertical, 10)
             }
         }
-        .background(theme.glassBackground ? Color.black.opacity(backgroundOpacity) : Color(nsColor: .windowBackgroundColor))
+        .background(theme.glassBackground ? Color.clear : Color(nsColor: .windowBackgroundColor))
         .navigationTitle((destination ?? .all).title)
     }
     private var toolbarControls: some View {
@@ -188,18 +190,25 @@ struct NativeLibraryView: View {
             HStack(spacing: 8) {
                 sidebarToggle
                 searchField(minimumWidth: 80)
-                importButton
-                deleteButton
-                downloadButton
-                settingsButton
+                HStack(spacing: 0) {
+                    importButton
+                    deleteButton
+                    downloadButton
+                    settingsButton
+                }
+                .padding(.horizontal, 4)
+                .modifier(ClearGlassControl(radius: 22))
+                Spacer(minLength: 0)
             }
 
             HStack(spacing: 8) {
                 sidebarToggle
                 searchField(minimumWidth: 70)
                 actionsMenu
+                Spacer(minLength: 0)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 20)
         .padding(.trailing, 190)
         .padding(.top, 12)
@@ -229,21 +238,21 @@ struct NativeLibraryView: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(minWidth: minimumWidth, maxWidth: .infinity, minHeight: 44, maxHeight: 44)
+        .frame(minWidth: minimumWidth, idealWidth: 280, maxWidth: 320, minHeight: 44, maxHeight: 44)
         .modifier(ClearGlassControl(radius: 22))
     }
     private var importButton: some View {
         Button { importFiles(into: activeFolder) } label: {
             Image(systemName: "square.and.arrow.down").font(.system(size: 15)).frame(width: 44, height: 44)
         }
-        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .buttonStyle(GlassPressStyle())
         .help("Import Media").disabled(library.isImporting)
     }
     private var deleteButton: some View {
         Button { requestDelete(file: selectedFile, folder: selectedFile == nil ? activeFolder : nil) } label: {
             Image(systemName: "trash").font(.system(size: 15)).frame(width: 44, height: 44)
         }
-        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .buttonStyle(GlassPressStyle())
         .help("Delete Selected Media")
         .disabled(selectedFile == nil && activeFolder == nil)
     }
@@ -252,7 +261,7 @@ struct NativeLibraryView: View {
             Image(systemName: engine.isRunning ? "arrow.down.circle.fill" : "arrow.down.circle")
                 .font(.system(size: 15)).frame(width: 44, height: 44)
         }
-        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .buttonStyle(GlassPressStyle())
         .help("Download from a link")
         .popover(isPresented: $showDownloads, arrowEdge: .top) {
             DownloadComposer(engine: engine, library: library) { showDownloads = false }.frame(width: 440)
@@ -262,7 +271,7 @@ struct NativeLibraryView: View {
         Button { withAnimation(motion) { showSettings = true } } label: {
             Image(systemName: "gearshape").font(.system(size: 15)).frame(width: 44, height: 44)
         }
-        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .buttonStyle(GlassPressStyle())
         .help("Settings")
     }
     private var actionsMenu: some View {
@@ -274,7 +283,7 @@ struct NativeLibraryView: View {
             Button { showDownloads.toggle() } label: { Label("Download from a link", systemImage: "arrow.down.circle") }
             Button { withAnimation(motion) { showSettings = true } } label: { Label("Settings", systemImage: "gearshape") }
         } label: {
-            Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).frame(width: 44, height: 44)
+            Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).frame(width: 44, height: 44).contentShape(Circle())
         }
         .modifier(ClearGlassControl(radius: 22))
         .buttonStyle(GlassPressStyle())
@@ -343,7 +352,7 @@ struct NativeLibraryView: View {
             if playback.currentFile?.id == file.id {
                 Image(systemName: playback.isPlaying ? "waveform" : "pause.fill").foregroundStyle(accent).accessibilityLabel(playback.isPlaying ? "Playing" : "Paused")
             }
-            Menu { fileMenu(file) } label: { Image(systemName: "ellipsis").frame(width: 24, height: 30) }.menuStyle(.borderlessButton).fixedSize().help("File actions")
+            Menu { fileMenu(file) } label: { Image(systemName: "ellipsis").frame(width: 24, height: 30) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("File actions")
         }
         .padding(.vertical, 7).contentShape(Rectangle())
         .onTapGesture(count: 2) { selection = file.id; playback.play(file, queue: visibleFiles) }

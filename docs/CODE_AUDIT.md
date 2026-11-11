@@ -67,6 +67,27 @@ This was source inspection only. No test commands, build, application launch, In
 4. Consider a diagnostics status for background-helper copy failures; artwork copy/clear failures now have a visible alert.
 
 
-## Final package checkpoint
+## Final package and UI checkpoint — 12 November 2026
 
-The parent completed the MediaFetch 1.2 release build, deep signature verification, ZIP integrity verification and the functional checks recorded in `VALIDATION.md`. The final compact-header/resize screenshot pass was blocked by the Mac lock screen. Publication as a final release should follow that UI check; the reports do not treat the lock-screen blocker as a passed visual check.
+The MediaFetch 1.2 production build, deep signature verification and ZIP integrity
+check passed. After the Mac was unlocked, packaged UI checks verified the aligned
+header, compact Actions menu, and clicks inside the empty padding of the page,
+Help and Actions bubbles. The asynchronous import sheet opened and was canceled
+without importing files.
+
+A real five-minute MP3 exposed a spectrum view that stayed flat despite nonzero
+analyser output. The small spectrum view now observes playback changes and uses
+the animation timeline date to advance its displayed playhead. Analysis publishes
+partial results before the entire song finishes decoding. The rebuilt app showed
+different nonzero band shapes at 8 and 37 seconds while playback continued; the
+preparation label disappeared on completion. The long-file progressive-analysis
+fixture and palette checks passed, including neutral gray/black/white covers.
+
+The artwork-colour backdrop now uses full-pane soft radial fields over a coloured
+foundation, preserving lava-lamp motion without isolated overlapping discs or
+black gaps. Representative palette colours are deduplicated and normalized while
+retaining their hue; neutral artwork remains neutral.
+
+Exact 800×680 geometry, VoiceOver, external-volume operations and Instruments
+memory/frame-pacing profiling remain unverified. These checks do not establish a
+whole-process RAM reduction or a measured 60 FPS guarantee.

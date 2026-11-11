@@ -44,7 +44,9 @@ final class AudioVisualizationStore: ObservableObject {
             loading = true
             analysisTask = Task.detached(priority: .utility) { [weak self] in
                 do {
-                    let analysis = try await AudioAnalysis.read(url: key.url)
+                    let analysis = try await AudioAnalysis.read(url: key.url) { [weak self] partial in
+                        await self?.publish(partial, key: key, generation: nextGeneration)
+                    }
                     await self?.finish(analysis: analysis, key: key, generation: nextGeneration)
                 } catch is CancellationError {
                     // A newer file has taken over.
@@ -66,6 +68,11 @@ final class AudioVisualizationStore: ObservableObject {
     func bands(at time: Double) -> [Float] {
         guard time.isFinite, let analysis = activeAnalysis else { return Self.emptyBands }
         return analysis.bands(at: max(0, time))
+    }
+
+    private func publish(_ analysis: AudioAnalysis, key: FileKey, generation: UUID) {
+        guard self.generation == generation, activeKey == key else { return }
+        activeAnalysis = analysis
     }
 
     private func finish(analysis: AudioAnalysis, key: FileKey, generation: UUID) {
@@ -137,7 +144,7 @@ private struct AudioAnalysis {
         }
     }
 
-    static func read(url: URL) async throws -> AudioAnalysis {
+    static func read(url: URL, onProgress: @escaping @Sendable (AudioAnalysis) async -> Void) async throws -> AudioAnalysis {
         let asset = AVURLAsset(url: url)
         guard let track = try await asset.loadTracks(withMediaType: .audio).first else {
             return AudioAnalysis(startTime: 0, frameInterval: 1, values: [], frameCount: 0)
@@ -159,6 +166,7 @@ private struct AudioAnalysis {
         var analyser: AudioSpectrumAnalyser?
         var firstTime: Double = 0
         var outputValues: [UInt8] = []
+        var lastPublishedFrame = 0
         do {
             while let buffer = output.copyNextSampleBuffer() {
                 try Task.checkCancellation()
@@ -179,6 +187,17 @@ private struct AudioAnalysis {
                 }
                 guard copyStatus == noErr else { throw AudioAnalysisError.invalidSampleData }
                 analyser?.append(samples: samples, channels: Int(asbd.mChannelsPerFrame), into: &outputValues)
+                let frameCount = outputValues.count / 24
+                // Show the first few seconds promptly, then refresh through the rest of the file.
+                let nextInterval = lastPublishedFrame == 0 ? 36 : 90
+                if frameCount - lastPublishedFrame >= nextInterval, let analyser {
+                    try Task.checkCancellation()
+                    await onProgress(AudioAnalysis(startTime: firstTime + analyser.firstFrameOffset,
+                                                   frameInterval: analyser.frameInterval,
+                                                   values: outputValues,
+                                                   frameCount: frameCount))
+                    lastPublishedFrame = frameCount
+                }
             }
             try Task.checkCancellation()
             if reader.status == .failed { throw reader.error ?? AudioAnalysisError.readerFailed }

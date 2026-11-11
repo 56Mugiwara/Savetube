@@ -11,6 +11,7 @@ struct SaveTubeRootView: View {
     @ObservedObject var engine: DownloadEngine
     @StateObject private var homeState = DownloadHomeState()
     @State private var page: SaveTubePage = .downloader
+    @State private var nativeTopInset: CGFloat = 0
     @AppStorage("SaveTube.tourCompleted.v1") private var tourCompleted = false
     @State private var showTour = false
     @State private var showingHelp = false
@@ -34,6 +35,7 @@ struct SaveTubeRootView: View {
 
                 NativeLibraryView(library: library, engine: engine,
                                   isActive: page == .player && !showTour,
+                                  nativeTopInset: nativeTopInset,
                                   switchToDownloader: { page = .downloader })
                     .opacity(page == .player ? 1 : 0)
                     .offset(x: reduceMotion || page == .player ? 0 : 14)
@@ -51,14 +53,18 @@ struct SaveTubeRootView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea(.container, edges: .top)
         .overlay(alignment: .topTrailing) {
             if !showTour {
                 HStack(spacing: 8) {
-                    Button(page == .downloader ? "Player" : "Downloader") {
+                    Button {
                         if page == .downloader { showPlayer() } else { page = .downloader }
+                    } label: {
+                        Text(page == .downloader ? "Player" : "Downloader")
+                            .frame(width: 110, height: 44)
+                            .modifier(ClearGlassControl(radius: 22))
+                            .contentShape(Capsule())
                     }
-                    .frame(width: 110, height: 44)
-                    .modifier(ClearGlassControl(radius: 22))
                     .buttonStyle(GlassPressStyle())
                     .help(page == .downloader ? "Open Player (Command-2)" : "Open Downloader (Command-1)")
 
@@ -66,9 +72,9 @@ struct SaveTubeRootView: View {
                         Image(systemName: "questionmark.circle")
                             .font(.system(size: 16))
                             .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
+                            .modifier(ClearGlassControl(radius: 22))
+                            .contentShape(Circle())
                     }
-                    .modifier(ClearGlassControl(radius: 22))
                     .buttonStyle(GlassPressStyle())
                     .help("MediaFetch Help")
                     .popover(isPresented: $showingHelp, arrowEdge: .top) {
@@ -81,7 +87,7 @@ struct SaveTubeRootView: View {
                 .zIndex(3)
             }
         }
-        .background(WindowChrome())
+        .background(WindowChrome(nativeTopInset: $nativeTopInset))
         .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: page)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: showTour)
         .onAppear { if !tourCompleted { page = .downloader; showTour = true } }

@@ -15,6 +15,12 @@ struct Failure: Error { let message: String }
         guard let color = store.colors.first, let rgb = NSColor(color).usingColorSpace(.deviceRGB), rgb.redComponent > rgb.blueComponent * 2 else {
             throw Failure(message: "Embedded red artwork was not used")
         }
+        let normalized = store.colors.compactMap { NSColor($0).usingColorSpace(.deviceRGB) }
+        let distinct = Set(normalized.map { String(format: "%.2f,%.2f,%.2f", $0.redComponent, $0.greenComponent, $0.blueComponent) })
+        guard normalized.count == 5, distinct.count == 5,
+              normalized.allSatisfy({ max($0.redComponent, max($0.greenComponent, $0.blueComponent)) >= 0.28 && max($0.redComponent, max($0.greenComponent, $0.blueComponent)) <= 0.67 }) else {
+            throw Failure(message: "Bright single-color artwork did not produce five distinct dark palette roles")
+        }
 
         await ArtworkOverrides.shared.set(imageURL: wallpaper, for: artworkFile)
         guard let savedOverride = ArtworkOverrides.shared.customURL(for: artworkFile),
@@ -52,6 +58,30 @@ struct Failure: Error { let message: String }
         guard let color = store.colors.first, let rgb = NSColor(color).usingColorSpace(.deviceRGB), rgb.greenComponent > rgb.redComponent * 2 else {
             throw Failure(message: "Adjacent sidecar artwork was not used")
         }
+        let grayFile = MediaFile(url: root.appendingPathComponent("gray-cover.mp3"), kind: "MP3")
+        await ArtworkOverrides.shared.set(imageURL: root.appendingPathComponent("grayscale.png"), for: grayFile)
+        store.prepare(file: grayFile, wallpaperURL: wallpaper)
+        try await wait(store, source: "Artwork · gray-cover")
+        let grayColors = store.colors.compactMap { NSColor($0).usingColorSpace(.deviceRGB) }
+        let grayLuminances = Set(grayColors.map { String(format: "%.2f", max($0.redComponent, max($0.greenComponent, $0.blueComponent))) })
+        guard grayColors.count == 5, grayLuminances.count == 5,
+              grayColors.allSatisfy({ abs($0.redComponent - $0.greenComponent) < 0.02 && abs($0.greenComponent - $0.blueComponent) < 0.02 }) else {
+            throw Failure(message: "Grayscale artwork did not produce distinct neutral palette roles: \(grayColors.map { [$0.redComponent, $0.greenComponent, $0.blueComponent] })")
+        }
+        ArtworkOverrides.shared.clear(file: grayFile)
+        for (name, shouldBeDark) in [("black", true), ("white", false)] {
+            await ArtworkOverrides.shared.set(imageURL: root.appendingPathComponent("\(name).png"), for: grayFile)
+            store.prepare(file: grayFile, wallpaperURL: wallpaper)
+            try await wait(store, source: "Artwork · gray-cover", matches: { color in
+                let peak = max(color.redComponent, max(color.greenComponent, color.blueComponent))
+                return shouldBeDark ? peak < 0.4 : peak > 0.58
+            })
+            let colors = store.colors.compactMap { NSColor($0).usingColorSpace(.deviceRGB) }
+            guard colors.count == 5, colors.allSatisfy({ abs($0.redComponent - $0.greenComponent) < 0.02 && abs($0.greenComponent - $0.blueComponent) < 0.02 }) else {
+                throw Failure(message: "\(name.capitalized) artwork did not stay neutral")
+            }
+        }
+        ArtworkOverrides.shared.clear(file: grayFile)
         try FileManager.default.removeItem(at: root.appendingPathComponent("no-artwork.png"))
         store.prepare(file: noArtwork, wallpaperURL: wallpaper)
         try await wait(store, source: "Wallpaper")

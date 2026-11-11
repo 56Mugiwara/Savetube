@@ -185,3 +185,22 @@ frame pacing, VoiceOver and Instruments stress profiling remain separate checks.
 See `CODE_AUDIT.md` and `POLISH_REPORT.md` for coverage, fixes, remaining validation
 and the proposed feature roadmap. No quantified whole-app RAM reduction or measured
 60 FPS guarantee is asserted by these source and fixture checks.
+
+## Final 1.2 UI verification — 12 November 2026
+
+Production build, deep signature and ZIP integrity checks passed. The shared header
+was checked with the compact Actions fallback. Empty-padding clicks in the page
+switch, Help and Actions controls worked, and the asynchronous import sheet opened
+and canceled successfully.
+
+The spectrum was traced against a real MP3: its analyser returned nonzero data,
+but the previous view remained flat. The small spectrum view now observes playback
+and advances from the TimelineView date; analysis also publishes early partial
+results. In the rebuilt app, the track continued playing and different nonzero band
+shapes were visible at 8 and 37 seconds. The loading label cleared after analysis.
+The expanded player showed the revised full-pane artwork-colour fields and native
+AirPlay control. Palette fixtures cover vivid single-colour and neutral gray, black
+and white images; the visualizer fixture checks partial output during long-file
+analysis and clearing that output when tracks change.
+
+Minimum-window geometry, VoiceOver and Instruments profiling remain unverified.
