@@ -13,7 +13,7 @@ PLIST
 SDK="${SDKROOT:-/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk}"
 swiftc -swift-version 5 -sdk "$SDK" -parse-as-library "$ROOT/Sources/SaveTube/DownloadEngine.swift" "$ROOT/Tests/DownloadChecks/main.swift" -o "$APP/Contents/MacOS/DownloadChecks"
 if [[ "${1:-}" == "--real" ]]; then
-    HELPERS="${2:-$ROOT/dist/SaveTube.app/Contents/Helpers}"
+    HELPERS="${2:-$ROOT/dist/MediaFetch.app/Contents/Helpers}"
     for tool in yt-dlp ffmpeg ffprobe; do
         [[ -x "$HELPERS/$tool" ]] || { echo "Missing $HELPERS/$tool; build the app first." >&2; exit 1; }
         ln -s "$HELPERS/$tool" "$APP/Contents/Helpers/$tool"

@@ -22,6 +22,7 @@ final class PlaybackStore: ObservableObject {
     @Published private(set) var favoriteIDs: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "SaveTube.favoriteTracks") ?? [])
     enum RepeatMode { case off, all, one }
     private var originalQueue: [MediaFile] = []
+    private var wantsPlayback = false
     @Published var volume: Double = 0.8 {
         didSet { player.volume = Float(min(max(volume, 0), 1)) }
     }
@@ -36,18 +37,24 @@ final class PlaybackStore: ObservableObject {
 
     private init() {
         player.volume = Float(volume)
+        player.automaticallyWaitsToMinimizeStalling = false
         playbackObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
             Task { @MainActor [weak self] in
-                self?.isPlaying = player.timeControlStatus == .playing
+                guard let self else { return }
+                let preparing = player.currentItem?.status == .unknown
+                let playing = player.timeControlStatus == .playing || (self.wantsPlayback && (preparing || player.timeControlStatus == .waitingToPlayAtSpecifiedRate))
+                if self.isPlaying != playing { self.isPlaying = playing }
             }
         }
         timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.25, preferredTimescale: 600), queue: .main) { [weak self] time in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let seconds = time.seconds
-                self.currentTime = seconds.isFinite ? max(0, seconds) : 0
+                let nextTime = seconds.isFinite ? max(0, seconds) : 0
+                let previousTime = self.currentTime
+                if previousTime != nextTime { self.currentTime = nextTime }
                 self.updateDuration()
-                self.updateNowPlaying()
+                if Int(previousTime) != Int(nextTime) { self.updateNowPlaying() }
             }
         }
         configureRemoteCommands()
@@ -74,15 +81,25 @@ final class PlaybackStore: ObservableObject {
 
     func toggle() {
         guard currentFile != nil else { return }
-        if isPlaying { pause() } else { player.play(); isPlaying = true }
+        if isPlaying { pause() } else { resume() }
+    }
+
+    func resume() {
+        guard currentFile != nil else { return }
+        wantsPlayback = true
+        player.play()
+        isPlaying = true
+        updateNowPlaying()
     }
 
     func pause() {
+        wantsPlayback = false
         player.pause()
         isPlaying = false
     }
 
     func stop() {
+        wantsPlayback = false
         player.pause()
         clearItemObservers()
         player.replaceCurrentItem(with: nil)
@@ -151,6 +168,7 @@ final class PlaybackStore: ObservableObject {
         currentTime = 0
         duration = 0
         error = nil
+        wantsPlayback = true
         player.replaceCurrentItem(with: item)
         player.play()
         isPlaying = true
@@ -159,7 +177,9 @@ final class PlaybackStore: ObservableObject {
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             Task { @MainActor [weak self] in
                 guard let self, self.player.currentItem === item else { return }
-                if item.status == .failed {
+                if item.status == .readyToPlay, self.wantsPlayback {
+                    self.player.play()
+                } else if item.status == .failed {
                     self.error = item.error?.localizedDescription ?? "This file could not be played."
                     self.pause()
                     self.updateNowPlaying()
@@ -176,7 +196,7 @@ final class PlaybackStore: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self, self.player.currentItem === item else { return }
                 if self.repeatMode == .one {
-                    self.seek(to: 0); self.player.play(); self.isPlaying = true
+                    self.seek(to: 0); self.resume()
                 } else if self.canGoNext { self.next() } else { self.pause(); self.seek(to: 0) }
             }
         }
@@ -238,7 +258,7 @@ final class PlaybackStore: ObservableObject {
 
     private func updateDuration() {
         guard let seconds = player.currentItem?.duration.seconds, seconds.isFinite, seconds > 0 else { return }
-        duration = seconds
+        if duration != seconds { duration = seconds }
     }
 
     private func clearItemObservers() {
@@ -268,9 +288,7 @@ final class PlaybackStore: ObservableObject {
         remoteTargets.append((center.playCommand, center.playCommand.addTarget { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, self.currentFile != nil else { return }
-                self.player.play()
-                self.isPlaying = true
-                self.updateNowPlaying()
+                self.resume()
             }
             return .success
         }))
@@ -291,5 +309,34 @@ final class PlaybackStore: ObservableObject {
             Task { @MainActor [weak self] in self?.seek(to: event.positionTime) }
             return .success
         }))
+    }
+}
+
+
+/// Structural player changes invalidate library views; the playback clock belongs
+/// only to the small transport/seek controls that display it.
+@MainActor
+final class PlaybackPresentation: ObservableObject {
+    static let shared = PlaybackPresentation()
+    let store = PlaybackStore.shared
+    private var subscriptions: [AnyCancellable] = []
+    private init() {
+        let changes: [AnyPublisher<Void, Never>] = [
+            store.$currentFile.map { _ in () }.eraseToAnyPublisher(),
+            store.$isPlaying.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$duration.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$error.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$title.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$artist.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$album.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$queue.map { _ in () }.eraseToAnyPublisher(),
+            store.$shuffleEnabled.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$repeatMode.map { _ in () }.eraseToAnyPublisher(),
+            store.$favoriteIDs.removeDuplicates().map { _ in () }.eraseToAnyPublisher(),
+            store.$volume.removeDuplicates().map { _ in () }.eraseToAnyPublisher()
+        ]
+        subscriptions = changes.map { publisher in
+            publisher.dropFirst().sink { [weak self] in self?.objectWillChange.send() }
+        }
     }
 }

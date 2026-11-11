@@ -46,6 +46,8 @@ final class LibraryStore: ObservableObject {
     private var metadataURL: URL { root.appendingPathComponent(".library.json") }
     private let manager = FileManager.default
     private var canSave = true
+    private var savedMetadata: Data?
+    private var savedTracking: Data?
     private let trashHandler: ((URL) throws -> Void)?
 
     init(root: URL? = nil, trashHandler: ((URL) throws -> Void)? = nil) {
@@ -107,14 +109,16 @@ final class LibraryStore: ObservableObject {
                     try register(file)
                 }
             }
-            files = scanned.sorted {
+            let nextFiles = scanned.sorted {
                 let order = $0.name.localizedCaseInsensitiveCompare($1.name)
                 return order == .orderedSame ? $0.id < $1.id : order == .orderedAscending
             }
+            if files != nextFiles { files = nextFiles }
             let validFolders = Set(folders)
             // Temporarily missing files keep their assignments and bookmarks so a
             // later reappearance can restore the same row and folder membership.
-            assignments = assignments.filter { validFolders.contains($0.value) }
+            let nextAssignments = assignments.filter { validFolders.contains($0.value) }
+            if assignments != nextAssignments { assignments = nextAssignments }
             save()
         } catch {
             lastError = "Could not refresh the library: \(error.localizedDescription)"
@@ -478,9 +482,15 @@ final class LibraryStore: ObservableObject {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(Metadata(folders: folders, assign: assignments))
-            try data.write(to: metadataURL, options: .atomic)
+            if data != savedMetadata {
+                try data.write(to: metadataURL, options: .atomic)
+                savedMetadata = data
+            }
             let trackedData = try encoder.encode(tracked)
-            try trackedData.write(to: trackedURL, options: .atomic)
+            if trackedData != savedTracking {
+                try trackedData.write(to: trackedURL, options: .atomic)
+                savedTracking = trackedData
+            }
         } catch {
             lastError = "Could not save the library: \(error.localizedDescription)"
         }

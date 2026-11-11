@@ -51,7 +51,7 @@ final class DownloadEngine: ObservableObject {
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
                     let archive = folder.appendingPathComponent(".download-archive.txt")
                     var args = ["--ignore-config", "--no-playlist", "--newline", "--no-color", "--progress", "--continue",
-                                "--no-overwrites", "--download-archive", archive.path,
+                                "--no-overwrites", "--write-thumbnail", "--download-archive", archive.path,
                                 "--ffmpeg-location", ffmpeg.deletingLastPathComponent().path,
                                 "--progress-template", "download:SAVETUBE_PROGRESS:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s",
                                 "--print", "after_move:SAVETUBE_FILE:%(filepath)s", "--no-simulate",
@@ -118,12 +118,19 @@ final class DownloadEngine: ObservableObject {
     }
 
     nonisolated private static func executable(named name: String) throws -> URL {
-        let paths = [Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path,
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/\(name)").path
+        if Bundle.main.bundleURL.pathExtension.lowercased() == "app" {
+            guard FileManager.default.isExecutableFile(atPath: bundled) else {
+                throw DownloadFailure("Missing \(name). Install the complete MediaFetch release with its bundled helpers.")
+            }
+            return URL(fileURLWithPath: bundled)
+        }
+        let paths = [bundled,
                      "/opt/homebrew/bin/\(name)", "/usr/local/bin/\(name)",
                      FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Python/3.9/bin/\(name)").path]
             + (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":").map { "\($0)/\(name)" }
         if let path = paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) { return URL(fileURLWithPath: path) }
-        throw DownloadFailure("Missing \(name). Install the complete SaveTube release with its bundled download helpers.")
+        throw DownloadFailure("Missing \(name). Install the complete MediaFetch release with its bundled download helpers.")
     }
 
     nonisolated private static func run(executable: URL, arguments: [String], control: DownloadControl,
@@ -132,7 +139,11 @@ final class DownloadEngine: ObservableObject {
         process.executableURL = executable
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = executable.deletingLastPathComponent().path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
+        if Bundle.main.bundleURL.pathExtension.lowercased() == "app" {
+            environment["PATH"] = executable.deletingLastPathComponent().path + ":/usr/bin:/bin:/usr/sbin:/sbin"
+        } else {
+            environment["PATH"] = executable.deletingLastPathComponent().path + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" + (environment["PATH"] ?? "")
+        }
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe

@@ -76,7 +76,8 @@ struct ClearGlassControl: ViewModifier {
                     .background { if panel { shape.fill(Color.black.opacity(0.33)) } }
                     .glassEffect(.clear.tint(prominent ? .white.opacity(0.85) : theme.accent.opacity(panel ? 0.035 : 0.012)).interactive(), in: shape)
             } else {
-                content.background(GlassSurface(radius: radius, highlighted: prominent))
+                if prominent { content.background(shape.fill(Color.white.opacity(0.9))) }
+                else { content.background(GlassSurface(radius: radius)) }
             }
         }.overlay(shape.strokeBorder(Color.white.opacity(focused ? 0.5 : 0), lineWidth: 1.3))
     }

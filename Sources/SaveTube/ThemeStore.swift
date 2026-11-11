@@ -206,7 +206,11 @@ final class ThemeStore: ObservableObject {
     }
 
     nonisolated private static func matugenExecutable() -> URL? {
-        var paths = [Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/matugen").path, "/opt/homebrew/bin/matugen", "/usr/local/bin/matugen",
+        let bundled = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/matugen").path
+        if Bundle.main.bundleURL.pathExtension.lowercased() == "app" {
+            return FileManager.default.isExecutableFile(atPath: bundled) ? URL(fileURLWithPath: bundled) : nil
+        }
+        var paths = [bundled, "/opt/homebrew/bin/matugen", "/usr/local/bin/matugen",
                      FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".cargo/bin/matugen").path]
         paths += (ProcessInfo.processInfo.environment["PATH"] ?? "").split(separator: ":")
             .filter { !$0.isEmpty }.map { String($0) + "/matugen" }

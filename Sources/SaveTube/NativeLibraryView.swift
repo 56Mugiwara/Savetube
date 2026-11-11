@@ -22,11 +22,16 @@ struct NativeLibraryView: View {
     @ObservedObject var engine: DownloadEngine
     var isActive = true
     var switchToDownloader: (() -> Void)? = nil
-    @ObservedObject private var playback = PlaybackStore.shared
+    // PlaybackPresentation excludes the 4 Hz clock publisher, so a playing
+    // track does not rebuild the whole library list on every tick.
+    @ObservedObject private var playbackPresentation = PlaybackPresentation.shared
+    private var playback: PlaybackStore { PlaybackStore.shared }
+    @ObservedObject private var artworkOverrides = ArtworkOverrides.shared
     @ObservedObject private var theme = ThemeStore.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("SaveTube.backgroundOpacity") private var backgroundOpacity = 0.72
     @State private var destination: LibraryDestination? = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var selection: String?
     @State private var query = ""
     @State private var showDownloads = false
@@ -66,13 +71,14 @@ struct NativeLibraryView: View {
         return filtered
     }
     var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             sidebar
                 .navigationSplitViewColumnWidth(min: 175, ideal: 205, max: 260)
         } detail: {
             ZStack {
                 if showPlayer {
                     DetailNowPlayingView(store: playback, isActive: isActive) { withAnimation(motion) { showPlayer = false } }
+                        .padding(.top, 62)
                         .transition(reduceMotion ? .opacity : .move(edge: .bottom))
                         .zIndex(1)
                 } else {
@@ -87,14 +93,6 @@ struct NativeLibraryView: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
                 .animation(motion, value: showPlayer)
         }
-        .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                if let switchToDownloader {
-                    Button("Downloader", action: switchToDownloader)
-                        .buttonStyle(.bordered).help("Open Downloader (Command-1)")
-                }
-            }
-        }
         .background(LibraryKeyboard(onMove: { _ in false }, onOpen: {
             guard isActive && !naming && !deleting && !showSettings && !showDownloads,
                   let selectedFile, visibleFiles.contains(where: { $0.id == selectedFile.id }) else { return false }
@@ -108,7 +106,9 @@ struct NativeLibraryView: View {
         }).frame(width: 0, height: 0))
         .tint(accent)
         .background {
-            if theme.glassBackground { WindowBackdrop(glass: true) }
+            if theme.glassBackground {
+                WindowBackdrop(glass: true).overlay(Color.black.opacity(backgroundOpacity * 0.4))
+            }
             else { Color(nsColor: .windowBackgroundColor) }
         }
         .overlay { settingsPanel }
@@ -116,7 +116,7 @@ struct NativeLibraryView: View {
         .sheet(isPresented: $deleting) { deletionPanel }
         .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in if isActive { showSettings = true } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in if isActive { library.refresh() } }
-        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive { library.refresh() } }
+        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive && NSApplication.shared.isActive { library.refresh() } }
         .onChange(of: destination) { _ in selection = nil; showPlayer = false }
         .onChange(of: query) { _ in selection = nil }
         .animation(motion, value: playback.currentFile?.id)
@@ -124,6 +124,7 @@ struct NativeLibraryView: View {
         .alert("Library", isPresented: Binding(get: { isActive && library.lastError != nil }, set: { if !$0 { library.lastError = nil } })) {
             Button("OK") { library.lastError = nil }
         } message: { Text(library.lastError ?? "") }
+        .ignoresSafeArea(.container, edges: .top)
     }
     private var sidebar: some View {
         List(selection: $destination) {
@@ -151,7 +152,10 @@ struct NativeLibraryView: View {
             } header: { Text("Folders") }
         }
         .listStyle(.sidebar)
-        .navigationTitle("SaveTube")
+        .scrollContentBackground(.hidden)
+        .navigationTitle("MediaFetch")
+        .padding(.top, 62)
+        .background(Color.black.opacity(backgroundOpacity * 0.4))
         .safeAreaInset(edge: .bottom) {
             HStack {
                 Image(systemName: "arrow.down.circle").foregroundStyle(accent)
@@ -162,6 +166,7 @@ struct NativeLibraryView: View {
     }
     private var detail: some View {
         VStack(spacing: 0) {
+            toolbarControls
             header
             if !engine.status.isEmpty { downloadStatus }
             if visibleFiles.isEmpty { emptyLibrary }
@@ -177,20 +182,105 @@ struct NativeLibraryView: View {
         }
         .background(theme.glassBackground ? Color.black.opacity(backgroundOpacity) : Color(nsColor: .windowBackgroundColor))
         .navigationTitle((destination ?? .all).title)
-        .searchable(text: $query, prompt: "Search your library")
-        .toolbar {
-            ToolbarItemGroup {
-                Button { importFiles(into: activeFolder) } label: { Label("Import", systemImage: "square.and.arrow.down") }
-                    .help("Import music or videos").disabled(library.isImporting)
-                Button { requestDelete(file: selectedFile, folder: selectedFile == nil ? activeFolder : nil) } label: { Label("Delete", systemImage: "trash") }
-                    .disabled(selectedFile == nil && activeFolder == nil).help("Move selected media to Trash")
-                Button { showDownloads.toggle() } label: { Label("Download", systemImage: engine.isRunning ? "arrow.down.circle.fill" : "arrow.down.circle") }
-                    .help("Download from a link")
-                    .popover(isPresented: $showDownloads, arrowEdge: .top) {
-                        DownloadComposer(engine: engine, library: library) { showDownloads = false }.frame(width: 440)
-                    }
-                Button { withAnimation(motion) { showSettings = true } } label: { Label("Settings", systemImage: "gearshape") }.help("Settings")
+    }
+    private var toolbarControls: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                sidebarToggle
+                searchField(minimumWidth: 80)
+                importButton
+                deleteButton
+                downloadButton
+                settingsButton
             }
+
+            HStack(spacing: 8) {
+                sidebarToggle
+                searchField(minimumWidth: 70)
+                actionsMenu
+            }
+        }
+        .padding(.leading, 20)
+        .padding(.trailing, 190)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
+    }
+    private var sidebarToggle: some View {
+        Button {
+            columnVisibility = columnVisibility == .all ? .detailOnly : .all
+        } label: {
+            Image(systemName: columnVisibility == .all ? "sidebar.left" : "sidebar.right")
+                .font(.system(size: 15, weight: .medium))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .modifier(ClearGlassControl(radius: 22))
+        .buttonStyle(GlassPressStyle())
+        .help(columnVisibility == .all ? "Hide Sidebar" : "Show Sidebar")
+    }
+    private func searchField(minimumWidth: CGFloat) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField("Search", text: $query).textFieldStyle(.plain)
+            if !query.isEmpty {
+                Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
+                    .help("Clear Search")
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(minWidth: minimumWidth, maxWidth: .infinity, minHeight: 44, maxHeight: 44)
+        .modifier(ClearGlassControl(radius: 22))
+    }
+    private var importButton: some View {
+        Button { importFiles(into: activeFolder) } label: {
+            Image(systemName: "square.and.arrow.down").font(.system(size: 15)).frame(width: 44, height: 44)
+        }
+        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .help("Import Media").disabled(library.isImporting)
+    }
+    private var deleteButton: some View {
+        Button { requestDelete(file: selectedFile, folder: selectedFile == nil ? activeFolder : nil) } label: {
+            Image(systemName: "trash").font(.system(size: 15)).frame(width: 44, height: 44)
+        }
+        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .help("Delete Selected Media")
+        .disabled(selectedFile == nil && activeFolder == nil)
+    }
+    private var downloadButton: some View {
+        Button { showDownloads.toggle() } label: {
+            Image(systemName: engine.isRunning ? "arrow.down.circle.fill" : "arrow.down.circle")
+                .font(.system(size: 15)).frame(width: 44, height: 44)
+        }
+        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .help("Download from a link")
+        .popover(isPresented: $showDownloads, arrowEdge: .top) {
+            DownloadComposer(engine: engine, library: library) { showDownloads = false }.frame(width: 440)
+        }
+    }
+    private var settingsButton: some View {
+        Button { withAnimation(motion) { showSettings = true } } label: {
+            Image(systemName: "gearshape").font(.system(size: 15)).frame(width: 44, height: 44)
+        }
+        .modifier(ClearGlassControl(radius: 22)).buttonStyle(GlassPressStyle())
+        .help("Settings")
+    }
+    private var actionsMenu: some View {
+        Menu {
+            Button { importFiles(into: activeFolder) } label: { Label("Import Media", systemImage: "square.and.arrow.down") }
+                .disabled(library.isImporting)
+            Button { requestDelete(file: selectedFile, folder: selectedFile == nil ? activeFolder : nil) } label: { Label("Delete Selected Media", systemImage: "trash") }
+                .disabled(selectedFile == nil && activeFolder == nil)
+            Button { showDownloads.toggle() } label: { Label("Download from a link", systemImage: "arrow.down.circle") }
+            Button { withAnimation(motion) { showSettings = true } } label: { Label("Settings", systemImage: "gearshape") }
+        } label: {
+            Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).frame(width: 44, height: 44)
+        }
+        .modifier(ClearGlassControl(radius: 22))
+        .buttonStyle(GlassPressStyle())
+        .help("More Library Actions")
+        .popover(isPresented: $showDownloads, arrowEdge: .top) {
+            DownloadComposer(engine: engine, library: library) { showDownloads = false }.frame(width: 440)
         }
     }
     private var header: some View {
@@ -236,7 +326,10 @@ struct NativeLibraryView: View {
             }
         }
         .listStyle(.inset).scrollContentBackground(.hidden)
-        .onDeleteCommand { if let selectedFile { requestDelete(file: selectedFile) } }
+        .onDeleteCommand {
+            guard isActive && !showPlayer && !naming && !deleting && !showSettings && !showDownloads else { return }
+            if let selectedFile { requestDelete(file: selectedFile) }
+        }
         .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, into: activeFolder) }
     }
     private func mediaRow(_ file: MediaFile) -> some View {
@@ -261,6 +354,10 @@ struct NativeLibraryView: View {
         Button("Play") { playback.play(file, queue: visibleFiles) }
         Button("Show in Finder") { library.reveal(file) }
         Button("Open With Default App") { library.open(file) }
+        Divider()
+        Button("Choose Artwork…") { artworkOverrides.choose(file: file) }
+        Button("Reset Artwork") { artworkOverrides.clear(file: file) }
+            .disabled(!artworkOverrides.hasOverride(for: file))
         Divider()
         Button("Rename…") { beginName(file: file) }
         Button("Move File…") { move(file) }
@@ -363,8 +460,7 @@ struct NativeLibraryView: View {
         deleteFile = file; deleteFolder = folder; deleteContents = false; deleting = true
     }
     private func importFiles(into folder: String?) {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.mp3, .mpeg4Movie]; panel.allowsMultipleSelection = true
-        if panel.runModal() == .OK { library.importMediaAsync(urls: panel.urls, folder: folder) }
+        MediaImportPicker.shared.open { urls in library.importMediaAsync(urls: urls, folder: folder) }
     }
     private func move(_ file: MediaFile) {
         let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.prompt = "Move Here"

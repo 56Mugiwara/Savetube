@@ -25,13 +25,27 @@ final class MediaPaletteStore: ObservableObject {
         requestID = request
         let mediaURL = file.url
         let wallpaperURL = overrideWallpaperURL ?? Self.currentWallpaperURL()
-        let key = Self.cacheKey(mediaURL: mediaURL, wallpaperURL: wallpaperURL)
+        let preferredArtworkURL = ArtworkOverrides.shared.url(for: file)
+        let overridesRevision = ArtworkOverrides.shared.revision
+        let key = Self.cacheKey(mediaURL: mediaURL, wallpaperURL: wallpaperURL,
+                                preferredArtworkURL: preferredArtworkURL, overridesRevision: overridesRevision)
 
         requestTask = Task { [weak self] in
-            let result = await Task.detached(priority: .utility) {
-                await Self.palette(mediaURL: mediaURL, kind: file.kind,
-                                   wallpaperURL: wallpaperURL, cacheKey: key)
-            }.value
+            let worker = Task.detached(priority: .utility) {
+                try await Self.palette(mediaURL: mediaURL, kind: file.kind,
+                                       preferredArtworkURL: preferredArtworkURL,
+                                       wallpaperURL: wallpaperURL, cacheKey: key)
+            }
+            let result: Result?
+            do {
+                result = try await withTaskCancellationHandler {
+                    try await worker.value
+                } onCancel: {
+                    worker.cancel()
+                }
+            } catch {
+                return
+            }
             guard !Task.isCancelled, let self, self.requestID == request else { return }
             if let result {
                 self.colors = result.colors.map { Color(red: $0.r, green: $0.g, blue: $0.b) }
@@ -59,13 +73,13 @@ final class MediaPaletteStore: ObservableObject {
         return url
     }
 
-    private static func cacheKey(mediaURL: URL, wallpaperURL: URL?) -> String {
+    private static func cacheKey(mediaURL: URL, wallpaperURL: URL?, preferredArtworkURL: URL?, overridesRevision: Int) -> String {
         func signature(_ url: URL?) -> String {
             guard let url else { return "none" }
             let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
             return "\(url.standardizedFileURL.path)|\(values?.contentModificationDate?.timeIntervalSince1970 ?? 0)|\(values?.fileSize ?? 0)"
         }
-        return signature(mediaURL) + "|wallpaper:" + signature(wallpaperURL)
+        return signature(mediaURL) + "|artwork:" + signature(preferredArtworkURL) + "|revision:\(overridesRevision)|wallpaper:" + signature(wallpaperURL)
     }
 
     private struct RGB: Sendable {
@@ -80,19 +94,27 @@ final class MediaPaletteStore: ObservableObject {
     nonisolated private static let cacheLock = NSLock()
     nonisolated(unsafe) private static var cache: [String: Result] = [:]
 
-    nonisolated private static func palette(mediaURL: URL, kind: String, wallpaperURL: URL?, cacheKey: String) async -> Result? {
+    nonisolated private static func palette(mediaURL: URL, kind: String, preferredArtworkURL: URL?, wallpaperURL: URL?, cacheKey: String) async throws -> Result? {
+        try Task.checkCancellation()
         let cached = cacheLock.withLock { cache[cacheKey] }
         if let cached { return cached }
 
-        let media = await mediaImage(url: mediaURL, kind: kind)
+        let media = try await mediaImage(url: mediaURL, kind: kind, preferredArtworkURL: preferredArtworkURL)
+        try Task.checkCancellation()
         let result: Result?
         if let media {
-            result = Result(colors: sample(media), source: "Artwork · \(mediaURL.deletingPathExtension().lastPathComponent)")
+            let colors = sample(media)
+            try Task.checkCancellation()
+            result = Result(colors: colors, source: "Artwork · \(mediaURL.deletingPathExtension().lastPathComponent)")
         } else if let wallpaperURL, let wallpaper = imageSource(url: wallpaperURL) {
-            result = Result(colors: sample(wallpaper), source: "Wallpaper")
+            try Task.checkCancellation()
+            let colors = sample(wallpaper)
+            try Task.checkCancellation()
+            result = Result(colors: colors, source: "Wallpaper")
         } else {
             result = nil
         }
+        try Task.checkCancellation()
         if let result, !result.colors.isEmpty {
             cacheLock.withLock {
                 cache[cacheKey] = result
@@ -102,17 +124,30 @@ final class MediaPaletteStore: ObservableObject {
         return result
     }
 
-    nonisolated private static func mediaImage(url: URL, kind: String) async -> CGImage? {
+    nonisolated private static func mediaImage(url: URL, kind: String, preferredArtworkURL: URL?) async throws -> CGImage? {
+        try Task.checkCancellation()
+        if let preferredArtworkURL {
+            let image = imageSource(url: preferredArtworkURL)
+            try Task.checkCancellation()
+            if let image { return image }
+        }
         let asset = AVURLAsset(url: url)
         if kind.uppercased() == "MP3" {
-            guard let metadata = try? await asset.load(.commonMetadata) else { return nil }
+            guard let metadata = try? await asset.load(.commonMetadata) else {
+                try Task.checkCancellation()
+                return nil
+            }
+            try Task.checkCancellation()
             for item in AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .commonIdentifierArtwork) {
-                if let data = try? await item.load(.dataValue),
-                   let source = CGImageSourceCreateWithData(data as CFData, nil),
-                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                try Task.checkCancellation()
+                if let data = try? await item.load(.dataValue) {
+                    try Task.checkCancellation()
+                    guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+                          let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceThumbnailMaxPixelSize: 256
-                   ] as CFDictionary) {
+                          ] as CFDictionary) else { continue }
+                    try Task.checkCancellation()
                     return image
                 }
             }
@@ -121,7 +156,13 @@ final class MediaPaletteStore: ObservableObject {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 256, height: 256)
-        guard let (image, _) = try? await generator.image(at: .zero) else { return nil }
+        let generated = try? await withTaskCancellationHandler {
+            try await generator.image(at: .zero)
+        } onCancel: {
+            generator.cancelAllCGImageGeneration()
+        }
+        try Task.checkCancellation()
+        guard let (image, _) = generated else { return nil }
         return image
     }
 

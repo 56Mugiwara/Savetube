@@ -39,6 +39,8 @@ struct LibraryKeyboard: NSViewRepresentable {
                 if event.keyCode == 53, self.onEscape?() == true { return nil }
                 if let editor = window.firstResponder as? NSTextView, editor.isEditable { return event }
                 if let field = window.firstResponder as? NSTextField, field.isEditable { return event }
+                // Native focused buttons and sliders retain their normal keyboard actions.
+                if window.firstResponder is NSButton || window.firstResponder is NSSlider || window.firstResponder is NSSegmentedControl { return event }
                 switch event.keyCode {
                 case 126: return self.onMove?(-1) == true ? nil : event
                 case 125: return self.onMove?(1) == true ? nil : event

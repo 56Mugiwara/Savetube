@@ -18,21 +18,25 @@ final class AudioVisualizationStore: ObservableObject {
     private var generation = UUID()
     private var cache: [FileKey: AudioAnalysis] = [:]
     private var cacheOrder: [FileKey] = []
+    private var cacheBytes = 0
+    private let cacheByteLimit = 32 * 1024 * 1024
 
     private init() {}
 
     func prepare(file: MediaFile) {
-        analysisTask?.cancel()
-        analysisTask = nil
-        activeAnalysis = nil
-        error = nil
-        let nextGeneration = UUID()
-        generation = nextGeneration
-
         do {
             let key = try FileKey(url: file.url)
+            // Repeated SwiftUI lifecycle callbacks for the same file must not restart analysis.
+            if activeKey == key, (activeAnalysis != nil || (analysisTask != nil && loading)) { return }
+            analysisTask?.cancel()
+            analysisTask = nil
+            activeAnalysis = nil
+            error = nil
+            let nextGeneration = UUID()
+            generation = nextGeneration
             activeKey = key
             if let cached = cache[key] {
+                touch(key)
                 activeAnalysis = cached
                 loading = false
                 return
@@ -49,6 +53,9 @@ final class AudioVisualizationStore: ObservableObject {
                 }
             }
         } catch {
+            analysisTask?.cancel()
+            analysisTask = nil
+            activeAnalysis = nil
             activeKey = nil
             loading = false
             self.error = error.localizedDescription
@@ -67,11 +74,17 @@ final class AudioVisualizationStore: ObservableObject {
         loading = false
         analysisTask = nil
         cache[key] = analysis
-        cacheOrder.removeAll { $0.url == key.url }
-        cacheOrder.append(key)
-        while cacheOrder.count > 4 {
-            cache.removeValue(forKey: cacheOrder.removeFirst())
+        cacheBytes += analysis.byteCost
+        touch(key)
+        while cacheBytes > cacheByteLimit || cacheOrder.count > 4, let oldest = cacheOrder.first {
+            cacheOrder.removeFirst()
+            if let removed = cache.removeValue(forKey: oldest) { cacheBytes -= removed.byteCost }
         }
+    }
+
+    private func touch(_ key: FileKey) {
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
     }
 
     private func fail(_ failure: Error, generation: UUID) {
@@ -106,6 +119,7 @@ private struct AudioAnalysis {
     let frameInterval: Double
     let values: [UInt8]
     let frameCount: Int
+    var byteCost: Int { values.count }
 
     func bands(at time: Double) -> [Float] {
         guard frameCount > 0 else { return [Float](repeating: 0, count: 24) }

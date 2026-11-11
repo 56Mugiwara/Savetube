@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import Combine
 
 // Keep this check independent of the library UI and its SwiftUI macro toolchain.
 struct MediaFile: Identifiable, Hashable {
@@ -25,12 +26,26 @@ struct PlaybackChecks {
         store.volume = 0
         defer { store.stop() }
 
+        // A pause while a local item is preparing must win over ready callbacks.
         store.play(first, queue: [first, second])
+        store.pause()
+        try await until("paused item ready") { store.player.currentItem?.status == .readyToPlay }
+        try await Task.sleep(nanoseconds: 250_000_000)
+        guard !store.isPlaying, store.player.rate == 0 else { throw CheckFailure(description: "Readiness resumed an explicitly paused item") }
+        store.toggle()
+        try await until("resume after preparation") { store.player.rate > 0 && store.currentTime > 0.1 }
+        let presentation = PlaybackPresentation.shared
+        var structuralUpdates = 0
+        let subscription = presentation.objectWillChange.sink { structuralUpdates += 1 }
         try await until("MP3 duration") { store.duration > 3 && store.player.currentItem?.status == .readyToPlay }
         try await until("embedded track metadata") { store.title == "Fixture Track" && store.artist == "Fixture Artist" }
         try await until("MP3 playback time advances") { store.currentTime > 0.3 }
         guard store.currentFile == first, store.player.currentItem != nil else { throw CheckFailure(description: "MP3 was not loaded into AVPlayer") }
 
+        let beforeClock = structuralUpdates
+        try await Task.sleep(nanoseconds: 550_000_000)
+        guard structuralUpdates == beforeClock else { throw CheckFailure(description: "Playback clock invalidated structural library presentation") }
+        subscription.cancel()
         store.pause()
         let pausedAt = store.currentTime
         try await Task.sleep(nanoseconds: 600_000_000)

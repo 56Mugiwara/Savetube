@@ -25,7 +25,7 @@ struct OnboardingTour: View {
                 Color.black.opacity(0.78).ignoresSafeArea()
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
-                        Text("Savetube").font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text("MediaFetch").font(.system(size: 15, weight: .bold, design: .rounded))
                         Spacer()
                         Text("\(step + 1) of \(pages.count)")
                             .font(.system(size: 12, weight: .medium, design: .rounded))
@@ -62,7 +62,7 @@ struct OnboardingTour: View {
                             Button("Back") { changeStep(to: step - 1) }
                                 .buttonStyle(ClearGlassButtonStyle())
                         }
-                        Button(step == pages.count - 1 ? "Start using Savetube" : "Next") {
+                        Button(step == pages.count - 1 ? "Start using MediaFetch" : "Next") {
                             if step == pages.count - 1 { onFinish() }
                             else { changeStep(to: step + 1) }
                         }

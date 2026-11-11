@@ -160,3 +160,28 @@ animated cards and a reduced-motion alternative.
 
 Packaged keyboard checks confirmed Space paused in Player, resumed from Downloader,
 and remained a literal space while typing a two-word search without pausing audio.
+
+## MediaFetch 1.2
+
+SaveTube's visible app name and distribution bundle are now MediaFetch. The bundle
+identifier, persisted settings keys and media directory are intentionally retained.
+The app ships as `MediaFetch.app` with matching ZIP/checksum names.
+
+Validation passed for playback preparation/pause/resume and structural-only player
+updates (clock ticks do not notify the large presentation views), core library and
+file operations, mock download sequencing/cancellation, real local HTTP MP4 + MP3
+conversion, bundled Matugen, palette/custom artwork/sidecar precedence, invalid
+artwork preservation, and visualizer fixtures. The added artwork checks exercise
+4096-pixel source images, exact 128/1024-pixel presentation copies, and shared-request
+cancellation. These are functional tests, not a whole-process memory benchmark.
+
+Artwork decode work is limited to three concurrent tasks with per-consumer
+cancellation. NSCache has a 64 MiB decoded-cost target and 64 entries; audio analysis
+retains at most four cached analyses within 32 MiB, plus any active analysis.
+NSCache limits are eviction targets, not a total-process RAM ceiling. Visible canvas
+animations request 60 Hz; native effects follow system rendering. Hardware-specific
+frame pacing, VoiceOver and Instruments stress profiling remain separate checks.
+
+See `CODE_AUDIT.md` and `POLISH_REPORT.md` for coverage, fixes, remaining validation
+and the proposed feature roadmap. No quantified whole-app RAM reduction or measured
+60 FPS guarantee is asserted by these source and fixture checks.

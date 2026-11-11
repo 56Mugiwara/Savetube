@@ -2,9 +2,15 @@ import SwiftUI
 
 /// Playback stays available while the Downloader is in front of the library.
 struct DownloaderMiniPlayer: View {
-    @ObservedObject var store: PlaybackStore = .shared
+    let store: PlaybackStore
+    @ObservedObject private var presentation = PlaybackPresentation.shared
     let onOpenPlayer: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @MainActor init(store: PlaybackStore? = nil, onOpenPlayer: @escaping () -> Void) {
+        self.store = store ?? .shared
+        self.onOpenPlayer = onOpenPlayer
+    }
 
     var body: some View {
         Group {
@@ -44,12 +50,7 @@ struct DownloaderMiniPlayer: View {
                     .accessibilityLabel("Open full player")
                 }
 
-                Slider(value: Binding(
-                    get: { min(store.currentTime, max(store.duration, 0)) },
-                    set: { store.seek(to: $0) }
-                ), in: 0...max(store.duration, 1))
-                    .controlSize(.small)
-                    .accessibilityLabel("Playback position")
+                MiniPlaybackProgress(store: store)
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .modifier(ClearGlassControl(radius: 18, panel: true))
@@ -69,5 +70,20 @@ struct DownloaderMiniPlayer: View {
         }
         .buttonStyle(GlassPressStyle())
         .accessibilityLabel(label)
+    }
+}
+
+/// Clock ticks redraw only the seek control, leaving artwork and transport
+/// controls driven by structural playback changes.
+private struct MiniPlaybackProgress: View {
+    @ObservedObject var store: PlaybackStore
+
+    var body: some View {
+        Slider(value: Binding(
+            get: { min(store.currentTime, max(store.duration, 0)) },
+            set: { store.seek(to: $0) }
+        ), in: 0...max(store.duration, 1))
+            .controlSize(.small)
+            .accessibilityLabel("Playback position")
     }
 }

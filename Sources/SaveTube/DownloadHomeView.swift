@@ -19,6 +19,7 @@ struct DownloadHomeView: View {
     @ObservedObject var library: LibraryStore
     @ObservedObject var engine: DownloadEngine
     @ObservedObject var state: DownloadHomeState
+    @ObservedObject private var artworkOverrides = ArtworkOverrides.shared
     var isActive = true
     let switchToPlayer: () -> Void
     let playInPlayer: (MediaFile) -> Void
@@ -49,7 +50,7 @@ struct DownloadHomeView: View {
             state.query.isEmpty || matches.contains { library.assignments[$0.id] == folder }
         }
     }
-    private var selectedFile: MediaFile? { matches.first { $0.id == state.selected } }
+    private var selectedFile: MediaFile? { matches.first { $0.id == state.selected && visibleRowIDs.contains($0.id) } }
     private var selectedFolder: String? {
         guard let value = state.selected, value.hasPrefix("folder:") else { return nil }
         let folder = String(value.dropFirst(7))
@@ -67,14 +68,16 @@ struct DownloadHomeView: View {
         return ids
     }
     var body: some View {
+        GeometryReader { geometry in
+            content(compact: geometry.size.height < 760)
+        }
+    }
+    private func content(compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Savetube").font(.system(size: 24, weight: .bold))
+                Text("MediaFetch").font(.system(size: 24, weight: .bold))
                 Spacer()
-                Button("Player", action: switchToPlayer)
-                    .buttonStyle(.bordered).controlSize(.regular)
-                    .help("Open Player (Command-2)")
-            }.padding(.bottom, 24)
+            }.padding(.bottom, compact ? 12 : 24)
             HStack(spacing: 12) {
                 TextField("Paste a video link…", text: $state.link)
                     .textFieldStyle(.plain).font(.system(size: 13)).onSubmit(download)
@@ -89,7 +92,7 @@ struct DownloadHomeView: View {
                 PillButton(title: "Open Folder", action: openFolder).frame(width: 140, height: 44)
                 PillButton(title: "Download", solid: true, action: download).frame(width: 160, height: 44)
             }
-            downloadStatus.padding(.top, 12).padding(.bottom, 24)
+            downloadStatus.padding(.top, compact ? 6 : 12).padding(.bottom, compact ? 12 : 24)
             HStack(spacing: 16) {
                 Text("Library").font(.system(size: 14, weight: .bold))
                 Text("\(matches.count) \(matches.count == 1 ? "item" : "items")").font(.system(size: 10)).foregroundStyle(.secondary)
@@ -112,7 +115,7 @@ struct DownloadHomeView: View {
             }
             DownloaderMiniPlayer(onOpenPlayer: switchToPlayer)
         }
-        .frame(maxWidth: 880).padding(.horizontal, 40).padding(.top, 62).padding(.bottom, 12)
+        .frame(maxWidth: 880).padding(.horizontal, compact ? 28 : 40).padding(.top, 62).padding(.bottom, compact ? 6 : 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background {
             if theme.glassBackground { WindowBackdrop(glass: true).overlay(Color.black.opacity(backgroundOpacity)) }
@@ -124,7 +127,7 @@ struct DownloadHomeView: View {
         .sheet(isPresented: $deleting) { deletionPanel }
         .onReceive(NotificationCenter.default.publisher(for: .showSaveTubeSettings)) { _ in if isActive { settings = true } }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in if isActive { library.refresh() } }
-        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive { library.refresh() } }
+        .onReceive(Timer.publish(every: 3, on: .main, in: .common).autoconnect()) { _ in if isActive && NSApplication.shared.isActive { library.refresh() } }
         .background {
             Button("") { searchFocused = true }.keyboardShortcut("f").hidden()
             Button("", action: paste).keyboardShortcut("v", modifiers: [.command, .shift]).hidden()
@@ -222,7 +225,10 @@ struct DownloadHomeView: View {
             }
             ForEach(matches.filter { library.assignments[$0.id] == nil }) { file in row(file) }
         }.listStyle(.plain).scrollContentBackground(.hidden)
-            .onDeleteCommand { requestDelete(file: selectedFile, folder: selectedFolder) }
+            .onDeleteCommand {
+                guard isActive && !naming && !deleting && !settings else { return }
+                requestDelete(file: selectedFile, folder: selectedFolder)
+            }
             .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, into: selectedFolder) }
             .overlay {
                 if matches.isEmpty && visibleFolders.isEmpty {
@@ -272,6 +278,10 @@ struct DownloadHomeView: View {
                 Button("Play") { state.selected = file.id; play(file) }
                 Button("Show in Finder") { library.reveal(file) }
                 Button("Open With Default App") { library.open(file) }
+                Divider()
+                Button("Choose Artwork…") { artworkOverrides.choose(file: file) }
+                Button("Reset Artwork") { artworkOverrides.clear(file: file) }
+                    .disabled(!artworkOverrides.hasOverride(for: file))
                 Divider()
                 Button("Rename…") { beginName(file: file) }
                 Button("Move File…") { move(file) }
@@ -356,8 +366,7 @@ struct DownloadHomeView: View {
         deletedFile = file; deletedFolder = folder; deleteContents = false; deleting = true
     }
     private func importMedia(into folder: String?) {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [.mp3, .mpeg4Movie]; panel.allowsMultipleSelection = true
-        if panel.runModal() == .OK { library.importMediaAsync(urls: panel.urls, folder: folder) }
+        MediaImportPicker.shared.open { urls in library.importMediaAsync(urls: urls, folder: folder) }
     }
     private func move(_ file: MediaFile) {
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.prompt = "Move Here"

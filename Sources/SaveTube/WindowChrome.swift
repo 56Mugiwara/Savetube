@@ -2,18 +2,14 @@ import AppKit
 import SwiftUI
 
 struct WindowChrome: NSViewRepresentable {
-    let downloaderVisible: Bool
-
     func makeNSView(context: Context) -> ChromeView { ChromeView() }
     func updateNSView(_ view: ChromeView, context: Context) {
-        view.downloaderVisible = downloaderVisible
         view.applyChrome()
         // NavigationSplitView installs its toolbar during the same SwiftUI update.
         DispatchQueue.main.async { [weak view] in view?.applyChrome() }
     }
 
     final class ChromeView: NSView {
-        var downloaderVisible = true
         private var windowUpdateObserver: NSObjectProtocol?
 
         override func viewDidMoveToWindow() {
@@ -39,9 +35,7 @@ struct WindowChrome: NSViewRepresentable {
             if !window.styleMask.contains(.fullSizeContentView) { window.styleMask.insert(.fullSizeContentView) }
             if window.titlebarSeparatorStyle != .none { window.titlebarSeparatorStyle = .none }
             if !window.isMovableByWindowBackground { window.isMovableByWindowBackground = true }
-            if let toolbar = window.toolbar, toolbar.isVisible == downloaderVisible {
-                toolbar.isVisible = !downloaderVisible
-            }
+            if let toolbar = window.toolbar, toolbar.isVisible { toolbar.isVisible = false }
         }
     }
 }

@@ -5,14 +5,18 @@ import UniformTypeIdentifiers
 struct SaveTubeApp: App {
     @StateObject private var library = LibraryStore()
     @StateObject private var engine = DownloadEngine()
-    @StateObject private var playback = PlaybackStore.shared
+    @StateObject private var playbackPresentation = PlaybackPresentation.shared
+    private var playback: PlaybackStore { playbackPresentation.store }
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     var body: some Scene {
-        WindowGroup("Savetube") {
+        WindowGroup("MediaFetch") {
             SaveTubeRootView(library: library, engine: engine)
                 .frame(minWidth: 800, idealWidth: 900, minHeight: 680, idealHeight: 820)
                 .preferredColorScheme(.dark)
-                .onAppear { delegate.start(root: library.root, engine: engine) }
+                .onAppear {
+                    delegate.start(root: library.root, engine: engine)
+                    DispatchQueue.main.async { _ = MediaImportPicker.shared }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 900, height: 820)
@@ -23,7 +27,7 @@ struct SaveTubeApp: App {
                 Button("Player") { NotificationCenter.default.post(name: .showSaveTubePlayer, object: nil) }.keyboardShortcut("2")
             }
             CommandGroup(after: .help) {
-                Button("Show Savetube Tour") {
+                Button("Show MediaFetch Tour") {
                     NotificationCenter.default.post(name: .showSaveTubeTour, object: nil)
                 }
             }

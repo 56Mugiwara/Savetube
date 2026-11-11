@@ -2,7 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
-VERSION="${VERSION:-1.1.1}"
+VERSION="${VERSION:-1.2.0}"
 # Prefer the installed stable SDK when preview Command Line Tools are selected.
 if [[ -z "${SDKROOT:-}" && -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk ]]; then
   export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
@@ -13,7 +13,7 @@ case "$ARCH" in
   *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
 esac
 CACHE="$ROOT/.cache/helpers"
-APP="$ROOT/dist/SaveTube.app"
+APP="$ROOT/dist/MediaFetch.app"
 mkdir -p "$CACHE" "$ROOT/dist"
 
 # Validate existing cache entries as well as newly downloaded files.
@@ -42,8 +42,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleName</key><string>SaveTube</string>
-<key>CFBundleDisplayName</key><string>Savetube</string>
+<key>CFBundleName</key><string>MediaFetch</string>
+<key>CFBundleDisplayName</key><string>MediaFetch</string>
 <key>CFBundleIdentifier</key><string>com.56mugiwara.savetube</string>
 <key>CFBundleExecutable</key><string>SaveTube</string>
 <key>CFBundleIconFile</key><string>SaveTube</string>
@@ -133,7 +133,7 @@ EOF
 fi
 codesign --force --sign - "$APP"
 codesign --verify --deep --strict "$APP"
-ZIP="$ROOT/dist/SaveTube-$VERSION-macos-$ARCH.zip"
+ZIP="$ROOT/dist/MediaFetch-$VERSION-macos-$ARCH.zip"
 rm -f "$ZIP"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
 (cd "$ROOT/dist" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
