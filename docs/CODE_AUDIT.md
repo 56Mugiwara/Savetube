@@ -110,7 +110,7 @@ See `POLISH_REPORT.md` for the current maintenance scope and verification limits
 
 The sidebar refinement retains native List selection/accessibility and adds counts
 and restrained theme accents. Its hidden state now reserves toolbar space for the
-traffic lights. A reported animation glitch was traced to the same layout change
-being wrapped in both explicit and implicit springs; the final source uses only
+traffic lights. After the reported animation glitch, source review found both
+explicit and implicit spring declarations for the same change; the source now uses
 one 0.22-second ease-in/out transition. It is compiled but not visually rechecked,
 respecting the user's request not to reopen the app.

@@ -251,8 +251,8 @@ struct NativeLibraryView: View {
     }
     private var sidebarToggle: some View {
         Button {
-            // One timing curve owns the layout change. A second implicit spring
-            // on NavigationSplitView caused the column and toolbar to settle twice.
+            // Keep a single timing curve for the layout change rather than also
+            // applying an implicit spring to the entire split view.
             withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
                 columnVisibility = columnVisibility == .all ? .detailOnly : .all
             }
