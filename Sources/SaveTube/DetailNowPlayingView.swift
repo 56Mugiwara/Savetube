@@ -40,7 +40,7 @@ struct DetailNowPlayingView: View {
                 Button(action: onCollapse) {
                     Image(systemName: "chevron.down").font(.system(size: 16, weight: .semibold))
                         .frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22))
-                        .padding(4).contentShape(Rectangle())
+                        .padding(4).contentShape(Capsule())
                 }.buttonStyle(GlassPressStyle()).help("Back to library").accessibilityLabel("Collapse player")
                 Spacer(minLength: 0)
                 Menu {
@@ -51,7 +51,7 @@ struct DetailNowPlayingView: View {
                     Button("Stop Playback") { store.stop(); onCollapse() }
                 } label: {
                     Image(systemName: "ellipsis").frame(width: 44, height: 44)
-                        .modifier(ClearGlassControl(radius: 22)).padding(4).contentShape(Rectangle())
+                        .modifier(ClearGlassControl(radius: 22)).padding(4).contentShape(Capsule())
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More playback actions")
             }
@@ -90,17 +90,17 @@ struct DetailNowPlayingView: View {
                             Button(action: store.toggleFavorite) {
                                 Image(systemName: store.favoriteIDs.contains(file.id) ? "star.fill" : "star")
                                     .font(.system(size: 18)).frame(width: 44, height: 44)
-                                    .modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle())
+                                    .modifier(ClearGlassControl(radius: 22)).contentShape(Capsule())
                             }.buttonStyle(GlassPressStyle()).foregroundStyle(store.favoriteIDs.contains(file.id) ? accent : .white.opacity(0.8))
                                 .accessibilityLabel(store.favoriteIDs.contains(file.id) ? "Remove favorite" : "Favorite track")
                         }
                         progress
                         HStack(spacing: compact ? 32 : 44) {
-                            Button(action: store.previous) { Image(systemName: "backward.fill").font(.system(size: 22)).frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }
+                            Button(action: store.previous) { Image(systemName: "backward.fill").font(.system(size: 22)).frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()) }
                                 .disabled(!store.canGoPrevious).accessibilityLabel("Previous track")
-                            Button(action: store.toggle) { Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).foregroundStyle(.black).frame(width: 56, height: 56).modifier(ClearGlassControl(radius: 28, prominent: true)).contentShape(Rectangle()) }
+                            Button(action: store.toggle) { Image(systemName: store.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 28)).foregroundStyle(.black).frame(width: 56, height: 56).modifier(ClearGlassControl(radius: 28, prominent: true)).contentShape(Capsule()) }
                                 .accessibilityLabel(store.isPlaying ? "Pause" : "Play")
-                            Button(action: store.next) { Image(systemName: "forward.fill").font(.system(size: 22)).frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }
+                            Button(action: store.next) { Image(systemName: "forward.fill").font(.system(size: 22)).frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()) }
                                 .disabled(!store.canGoNext).accessibilityLabel("Next track")
                         }.buttonStyle(GlassPressStyle()).frame(maxWidth: .infinity)
                         VStack(spacing: 4) {
@@ -121,7 +121,7 @@ struct DetailNowPlayingView: View {
                     Button(action: onCollapse) {
                         Text("Return to Library")
                             .padding(.horizontal, 18).frame(height: 44)
-                            .modifier(ClearGlassControl()).contentShape(Rectangle())
+                            .modifier(ClearGlassControl()).contentShape(Capsule())
                     }.buttonStyle(GlassPressStyle())
                 }
             }.padding(.horizontal, 24).padding(.bottom, 24).frame(maxWidth: 640).frame(maxWidth: .infinity)
@@ -135,14 +135,14 @@ struct DetailNowPlayingView: View {
     private var secondaryControls: some View {
         VStack(spacing: 18) {
             HStack(spacing: 28) {
-                Button(action: store.toggleShuffle) { Image(systemName: "shuffle").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }
+                Button(action: store.toggleShuffle) { Image(systemName: "shuffle").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()) }
                     .foregroundStyle(store.shuffleEnabled ? accent : .white.opacity(0.7)).accessibilityLabel(store.shuffleEnabled ? "Disable shuffle" : "Enable shuffle")
-                Button(action: store.cycleRepeat) { Image(systemName: store.repeatMode == .one ? "repeat.1" : "repeat").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }
+                Button(action: store.cycleRepeat) { Image(systemName: store.repeatMode == .one ? "repeat.1" : "repeat").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()) }
                     .foregroundStyle(store.repeatMode == .off ? .white.opacity(0.7) : accent).accessibilityLabel(store.repeatMode == .off ? "Repeat off" : store.repeatMode == .all ? "Repeat all" : "Repeat one")
                 Spacer()
                 PlaybackRoutePicker(player: store.player).frame(width: 44, height: 44)
-                    .modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()).help("Choose audio output")
-                Button { showingQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Rectangle()) }.accessibilityLabel("Playing Next queue")
+                    .modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()).help("Choose audio output")
+                Button { showingQueue = true } label: { Image(systemName: "list.bullet").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Capsule()) }.accessibilityLabel("Playing Next queue")
             }.font(.system(size: 18)).buttonStyle(GlassPressStyle())
             HStack(spacing: 12) {
                 Image(systemName: "speaker.fill").font(.system(size: 11))
@@ -157,7 +157,7 @@ struct DetailNowPlayingView: View {
             Button { showingQueue = false } label: {
                 Label("Now Playing", systemImage: "chevron.left")
                     .padding(.horizontal, 16).frame(height: 44)
-                    .modifier(ClearGlassControl()).contentShape(Rectangle())
+                    .modifier(ClearGlassControl()).contentShape(Capsule())
             }.buttonStyle(GlassPressStyle()).padding(.horizontal, 26)
             List {
                 ForEach(store.queue) { file in
@@ -169,8 +169,8 @@ struct DetailNowPlayingView: View {
                         }
                         Spacer()
                         if file.id == store.currentFile?.id { Image(systemName: "waveform").foregroundStyle(accent) }
-                        else { Button { store.removeFromQueue(file) } label: { Image(systemName: "minus.circle").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }.buttonStyle(GlassPressStyle()).help("Remove from queue") }
-                    }.padding(.vertical, 6).contentShape(Rectangle())
+                        else { Button { store.removeFromQueue(file) } label: { Image(systemName: "minus.circle").frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Capsule()) }.buttonStyle(GlassPressStyle()).help("Remove from queue") }
+                    }.padding(.vertical, 6).contentShape(Capsule())
                         .onTapGesture(count: 2) { store.play(file, queue: store.queue); showingQueue = false }
                 }.onMove(perform: store.moveQueueItems)
             }.listStyle(.inset).scrollContentBackground(.hidden)

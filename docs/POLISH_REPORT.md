@@ -1,103 +1,116 @@
-# MediaFetch codebase audit
+# MediaFetch polish report
 
-**Scope:** source review of the working tree on 2026-11-11, including the MediaFetch 1.2.0 integration changes. The published baseline is `b4850d0`; this report describes the current source, not a verified release artifact. The original audit was read-only; follow-up implementation and focused checks are recorded under the findings they address. Findings are concrete issues or review risks, not a claim that every defect has been found.
+Maintenance pass: 12 November 2026. Scope is the existing Downloader, Library and
+player experience. No major features, rebranding or broad redesign are included.
+The baseline is v1.2.0 (`a35889c`). This report separates source changes, fixture
+checks and observations of the packaged app.
 
-## Findings
+## Interaction consistency
 
-### P2 — asynchronous image work can outlive the view that requested it
+Glass controls now define their hit shape inside the button label after applying
+its material. A global enlarged rectangular hit area previously overrode circular
+and capsule shapes; it has been removed. Circular actions use circular targets,
+text buttons use capsules, and the four actions within the shared toolbar use
+separate 44-point rectangular cells. This preserves the full bubble target without
+letting invisible corners overlap neighboring controls. Downloader Settings now
+uses the same 44-point circle as the shared header controls.
 
-**Status: Fixed in source; runtime profiling pending.** Artwork requests now share an in-flight decode by source signature and pixel bucket, track each waiter independently, and cancel the worker only after its final consumer cancels. A cancellation-safe FIFO permit actor limits active artwork decodes to three; canceled waiters are removed from its queue, and abandoned queued work does not start. Existing pixel buckets, downsampling, and cache cost/count limits remain. Palette preparation now wraps its detached worker in `withTaskCancellationHandler`, cancels that worker when a newer request takes over, and checks cancellation around cache access, media/wallpaper loads, sampling, and cache insertion. Video image generation also cancels AVAssetImageGenerator work when canceled.
+The selection lens continues to render separately from its labels, preserving
+stationary text during dragging. Hold expansion and bounded edge stretch remain.
+The player collapse control retains a 44-point visual circle and a larger 52-point
+circular target. Existing Reduce Motion behavior is preserved.
 
-**Validation:** focused Swift typechecking passed for the artwork/palette/player source group; `scripts/test-artwork.sh`, `scripts/test-palette.sh`, and `scripts/test-visualizer.sh` passed. The artwork fixture checks 128- and 1024-pixel output representations from a generated 4096-pixel source and verifies that one canceled consumer does not prevent a same-key waiter from receiving the result. This exercises coalesced cancellation and downsampling, but not the maximum concurrent worker count under load. Fast-scroll cancellation, rapid-track replacement, actual process RAM, and frame pacing still require a running app and Instruments. Do not infer measured performance from cache limits or the permit count alone.
+Validation: source inspection and production build passed. Packaged blank-padding
+clicks opened Help and switched workspaces. The Move sheet opened and canceled
+without moving a file. Space paused and resumed playback, and a two-word search
+survived switching pages while playback advanced beyond 38 seconds.
 
-### P3 — bundled helper fallback accepts executables from inherited `PATH`
+## Navigation and window layout
 
-**Status: Fixed in the current tree; packaged validation required.** The reviewed baseline could search inherited `PATH` when a bundled helper was missing. App bundles now resolve yt-dlp, FFmpeg and Matugen only from `Contents/Helpers`; a missing bundled tool produces an actionable error instead of silently using a substitute. The downloader subprocess also receives a restricted helper/system PATH. Command-line developer builds retain their toolchain lookup.
+Both workspaces remain mounted to preserve link text, filters, selection and scroll
+state. Hidden pages gate input and periodic work. The common page switch and Help
+stay in one root overlay; the Library's header reserves their space and compensates
+for the native split-view top inset. Compact layouts retain sidebar, search and an
+Actions menu. The window retains its immersive transparent titlebar. The sidebar keeps native
+List selection and keyboard navigation while using quieter icons, theme-colour
+emphasis on the selected destination, compact counts and smaller section headings.
+Opening/closing the sidebar uses a single 0.22-second ease-in/out transition.
+The overlapping explicit/implicit springs reported as glitchy were removed.
+Reduce Motion disables the transition. With the sidebar hidden, the left toolbar
+reserves space for the traffic lights.
 
-**Validation:** download fixtures (sequencing, progress, retry, cancellation) and real bundled Matugen generation pass. Final packaged helper/signature checks are recorded in the release validation section.
+Validation: v1.2.0 packaged checks verified header alignment and compact Actions.
+Exact minimum-size, fullscreen and maintenance-build checks are listed in the
+verification section; they are not inferred from source alone.
 
-## Area review
+## Playback and visual feedback
 
-### Playback and navigation
+Pausing now updates macOS Now Playing state and playback rate immediately; seeking
+publishes its new elapsed time. Focused checks cover rapid next/previous, preparing
+pause/resume, queue completion, repeat-one restart and unavailable queue entries.
+The small seek and spectrum views observe the clock independently of large page
+views, so normal playback does not redraw the whole library four times per second.
 
-Playback ownership is centralized in `PlaybackStore`; observers are removed/replaced when items change, stale item callbacks compare identity, queue stepping skips unreadable items, and playback state is separated from the 4 Hz presentation clock (`PlaybackStore.swift:63-70, 158-203`; `NativeLibraryView.swift:25-29`; `DownloaderMiniPlayer.swift:76-88`). The root intentionally keeps Downloader and Player views mounted and gates active work and accessibility/hit testing (`SaveTubeRootView.swift:19-45`). The previously identified hidden-page Delete-command risk is **Fixed in the current tree**: handlers now gate on active page and modal/player state (`DownloadHomeView.swift:223-226`, `NativeLibraryView.swift:284-287`). Native focused buttons/sliders/segmented controls are exempted from the local key monitor (`LibraryKeyboard.swift:39-51`); verify arrow, Return, and Space behavior against both focused controls and list navigation in the built app.
+The v1.2.0 spectrum fix is retained: partial analysis becomes available before the
+whole song finishes, and the display follows the animation timeline. FFT scratch
+arrays and frequency-bin ranges are now reused. A failed request invalidates the
+previous generation so a canceled reader cannot replace the current error later.
 
-No source-level playback race was confirmed. Item status and end notifications guard against stale player items; one practical follow-up is manual testing of rapid next/previous, pause while preparing, file removal during playback, and route changes. The audio visualizer cancels the prior analysis task and checks cancellation during sample-buffer reads, with a 32 MiB analysis cache (`AudioVisualizationStore.swift:19-62, 145-190`); cancellation and cache behavior were reviewed structurally, not benchmarked.
+The player retains its artwork-colour lava-lamp fields. No new visual effect was
+added in this maintenance pass. Hue-preserving palette extraction, distinct colour
+roles and neutral grayscale fallback remain covered by the palette checks.
 
-### Memory, artwork, and palette work
+## File-operation flow
 
-Artwork is downsampled through ImageIO or AVAssetImageGenerator, cached with a 64 MiB cost target, and deduplicated for identical in-flight keys (`MediaArtwork.swift:47-100, 105-144`). Active decode work has a three-permit bound with cancellable waiters; individual view cancellation releases only its own consumer, leaving a shared decode alive for remaining waiters (`MediaArtwork.swift:62-167, 195-235`). Custom artwork is copied into the app library, validated by ImageIO, persisted by stable file identity, and takes precedence over adjacent download thumbnails (`ArtworkOverrides.swift:28-54, 67-115`). The palette cache stores only small color samples and evicts over 32 keys (`MediaPaletteStore.swift:81-101`). These limits bound this component's concurrent decodes and retained cache target, not total process memory. No measured frame-rate or memory reduction is asserted.
+Both Move File entry points now use a shared asynchronous destination sheet instead
+of a nested modal run loop. Existing-history import also uses a sheet. Canceling a
+picker leaves files alone; the selected file's current location is resolved by the
+library before moving it.
 
-`ArtworkOverrides` copy/clear failures now publish a readable error to the root alert. Replacement images are validated before an atomic replacement; the palette checks verify that an invalid image preserves the existing saved artwork. Invalid/unavailable embedded art falls back to video thumbnails or the file-type glyph (`MediaArtwork.swift:72-89, 118-144`), so no confirmed broken fallback was found.
+Pending imports now follow virtual-folder renames. If the destination folder is
+deleted during copying, the imported media remains in the library without
+recreating that deleted folder. Regression checks cover both paths and preserve
+the original source files.
 
-### File management, import, and persistence
+Background-copy errors are surfaced through a concise app alert. Repeated errors
+are deduplicated by media type and category; helper output retains at most a
+1024-byte partial line. Unexpected exits are reported, while intentional shutdown
+removes handlers and closes pipes without an erroneous stopped-helper alert.
 
-`LibraryStore` filters out symlink/non-regular media, tracks stable bookmarks and file identity, stages and hashes imports, atomically writes metadata, and preserves missing-file assignments for recovery (`LibraryStore.swift:90-125, 136-168, 263-288, 333-380, 479-496`). Import copies are serialized off the main thread and busy state is reference-counted. Rename validation blocks path separators and extension changes; trash errors are reported (`LibraryStore.swift:384-438`). The native importer presents a reusable sheet instead of a nested modal panel (`MediaImportPicker.swift:4-34`).
+## Performance evidence
 
-Follow-up: the separate Move File panels use synchronous `runModal()` (`DownloadHomeView.swift:366-369`, `NativeLibraryView.swift:417-419`), unlike the asynchronous import picker. Review whether sheet presentation would fit the window flow better, and manually check moves across mounted volumes; no failure was confirmed in source review. Import/drop callbacks also need manual checks for access to files from external volumes and stale folder targets after the user changes pages (`DownloadHomeView.swift:370-383`, `NativeLibraryView.swift:421-436`). These paths were not exercised in the UI.
+A controlled 300-second generated MP3 was analyzed twice with the baseline source
+and twice with the maintenance source, using the same compiler, SDK and harness.
+Baseline user CPU was 11.76/11.69 seconds; maintenance was 11.87/12.00 seconds.
+Peak RSS was approximately 22.2–22.4 MB for all four runs. Both versions produced
+identical sampled band output. These results show no measurable end-to-end CPU or
+RSS improvement in this workload. Scratch-buffer reuse removes repeated
+allocations in source, but is not presented as a measured whole-app RAM reduction.
 
-### Downloads and helper processes
+Instruments/xctrace is unavailable in the installed Command Line Tools. The
+benchmark does not measure UI frame pacing, tab-switch latency or GPU usage.
 
-Download URLs are restricted to HTTP(S), arguments are passed directly to `Process`, yt-dlp config is disabled, output goes to format-specific folders, progress/completion is surfaced, and cancellation terminates yt-dlp children before the parent (`DownloadEngine.swift:21-65, 109-117, 129-174, 185-223`). The copy helpers reject symlinks, wait for stable size/date observations, hash before and after staging, and atomically expose completed copies (`BackgroundCopier.swift:48-100, 109-136`). The app delegate shuts helpers down on exit (`SaveTubeApp.swift:58-65`).
+## Verification and remaining checks
 
-Operational follow-up: `BackgroundCopier` logs errors to stderr rather than the UI (`BackgroundCopier.swift:84-96, 163-166`), so a failure copying to Downloads may be invisible to an ordinary user. Consider a user-visible helper status or a diagnostics action. Verify cancellation and helper shutdown in the packaged app; static review cannot prove child-process exit behavior on every yt-dlp/FFmpeg version.
+Passed focused checks: library/file operations and queued imports; background
+helper failure reporting, bounded diagnostics, restart and stop; playback/Now
+Playing state; spectrum fixtures; vivid and neutral palette fixtures. Production
+packaging and final UI observations will be recorded after the new build completes.
 
-### UI, accessibility, and error handling
+Packaged checks verified blank-area Help/page targets, Move-sheet cancellation,
+Space pause/resume, search retention during playback, narrow/wide headers, and the
+refined sidebar appearance and collapse/reopen states. The user then reported the
+sidebar animation as glitchy. Its two overlapping springs have been replaced by
+one eased transition, but the final motion has not been observed: the user asked
+that the app remain closed, and it was not relaunched for this final change.
 
-The app declares an 800×680 minimum window (`SaveTubeApp.swift:12-22`) and the expanded player adapts its artwork/spacing for compact geometry (`DetailNowPlayingView.swift:66-70`). A code review cannot confirm that all controls fit at that minimum, especially with the sidebar open; visual QA at 800×680 and with enlarged accessibility text remains required. The visualizer respects Reduce Motion (`DetailNowPlayingView.swift:220-223, 246-265`), and most custom controls have help or accessibility labels. Check VoiceOver order/selection announcements for the custom folder rows and toolbar buttons in a live build.
+Still requiring explicit verification: exact 800×680 layout, final sidebar motion,
+fullscreen transitions, VoiceOver navigation, external-volume moves and hardware
+frame pacing. A source change is not treated as a passed UI check.
 
-Several stateful errors are surfaced as alerts or inline messages (library, playback, download, theme). Artwork override failures now publish a readable error shown by the root alert; invalid replacements leave the existing saved artwork intact. No blanket suppression of download or library errors was found. `SettingsView` exposes background opacity only while glass is enabled and shows Matugen errors (`SettingsView.swift:33-69`).
+## Release gate
 
-## Coverage inventory
-
-- **App and navigation:** `SaveTubeApp.swift`, `SaveTubeRootView.swift`, `WindowChrome.swift`, `LibraryKeyboard.swift` — window setup, commands, page gating, titlebar behavior, keyboard monitor.
-- **Downloader and library UI:** `DownloadHomeView.swift`, `NativeLibraryView.swift`, `DownloaderMiniPlayer.swift`, `NativePlayerView.swift`, `DetailNowPlayingView.swift`, `HelpSummary.swift`, `OnboardingTour.swift` — page transitions, lists, dialogs, player controls, queue, compact layout, onboarding/help.
-- **Media and persistence:** `LibraryStore.swift`, `MediaImportPicker.swift`, `ArtworkOverrides.swift`, `MediaArtwork.swift`, `PlaybackStore.swift`, `AudioVisualizationStore.swift`, `MediaPaletteStore.swift` — file identity, import, artwork, playback, analysis and caches.
-- **Processes and appearance:** `DownloadEngine.swift`, `BackgroundCopier.swift`, `ThemeStore.swift`, `SettingsView.swift`, `GlassSurface.swift` — subprocesses, copy helpers, palette generation, glass/chrome.
-- **Entrypoints/build support:** `main.swift`, `Package.swift`, `scripts/build-app.sh`, `scripts/bundle-deno.sh`, `scripts/build-matugen.sh`, `.github/workflows/release.yml` — executable entry, package configuration and packaging paths reviewed at source level.
-- **Checks/docs reviewed for context:** `Tests/ThemeChecks/main.swift`, `Tests/VisualizationChecks/main.swift`, `Tests/DownloadChecks/main.swift`, `Tests/LibraryChecks/main.swift`, `Tests/PlaybackChecks/main.swift`, `Tests/PaletteChecks/main.swift`; `scripts/test-core.sh`, `scripts/test-downloads.sh`, `scripts/test-playback.sh`, `scripts/test-visualizer.sh`, `scripts/test-theme.sh`, `scripts/test-palette.sh`; `README.md`, `docs/VALIDATION.md`.
-
-## Limits and ordered follow-up
-
-This was source inspection only. No test commands, build, application launch, Instruments trace, accessibility inspection, mounted-volume exercise, download, or cancellation run was performed here. The parent task reports playback-intent/readiness and structural-clock checks passing; that is not evidence of UI smoothness, whole-process memory savings, or release packaging success. Re-audit the final merged tree and complete release/UI validation after the current build finishes.
-
-1. Measure fast-scroll and rapid-track-switch behavior with Instruments; confirm actual memory and frame pacing on target hardware.
-2. Verify the packaged helper paths and signatures; app-bundle lookup now excludes inherited `PATH`.
-3. Verify the 800×680 layout, keyboard focus, VoiceOver, external-volume imports, and Move picker behavior in the built application.
-4. Consider a diagnostics status for background-helper copy failures; artwork copy/clear failures now have a visible alert.
-
-
-## Final package and UI checkpoint — 12 November 2026
-
-The MediaFetch 1.2 production build, deep signature verification and ZIP integrity
-check passed. After the Mac was unlocked, packaged UI checks verified the aligned
-header, compact Actions menu, and clicks inside the empty padding of the page,
-Help and Actions bubbles. The asynchronous import sheet opened and was canceled
-without importing files.
-
-A real five-minute MP3 exposed a spectrum view that stayed flat despite nonzero
-analyser output. The small spectrum view now observes playback changes and uses
-the animation timeline date to advance its displayed playhead. Analysis publishes
-partial results before the entire song finishes decoding. The rebuilt app showed
-different nonzero band shapes at 8 and 37 seconds while playback continued; the
-preparation label disappeared on completion. The long-file progressive-analysis
-fixture and palette checks passed, including neutral gray/black/white covers.
-
-The artwork-colour backdrop now uses full-pane soft radial fields over a coloured
-foundation, preserving lava-lamp motion without isolated overlapping discs or
-black gaps. Representative palette colours are deduplicated and normalized while
-retaining their hue; neutral artwork remains neutral.
-
-Exact 800×680 geometry, VoiceOver, external-volume operations and Instruments
-memory/frame-pacing profiling remain unverified. These checks do not establish a
-whole-process RAM reduction or a measured 60 FPS guarantee.
-
-## Final visual direction
-
-The Library uses a quiet media-browser header rather than a full-width search strip:
-search is capped at 320 points, related actions share one 184×44 glass capsule, and
-standalone icons remain 44-point circles. An 8-point control grid and SF system type
-follow the native Music brief. The window backdrop uses the selected opacity
-consistently; the expanded artwork-colour canvas is the expressive focal point.
-Narrow layouts collapse secondary actions into an Actions menu while retaining
-search, sidebar visibility, the page switch and Help.
+Ship a patch release after the production build, signature and ZIP checks pass and
+any reproducible blocking UI regression found during the final pass is fixed.
+Keep v1.2.0 available for rollback. Further work stays limited to defects and polish;
+the earlier feature roadmap is deferred.

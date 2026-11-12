@@ -131,16 +131,16 @@ struct NativeLibraryView: View {
     private var sidebar: some View {
         List(selection: $destination) {
             Section {
-                Label("Recently Added", systemImage: "clock").tag(LibraryDestination.recent)
-                Label("All Media", systemImage: "square.stack").tag(LibraryDestination.all)
-                Label("Music", systemImage: "music.note").tag(LibraryDestination.music)
-                Label("Videos", systemImage: "play.rectangle").tag(LibraryDestination.videos)
-                Label("Favorites", systemImage: "star").tag(LibraryDestination.favorites)
-            } header: { Text("Library") }
+                sidebarRow("Recently Added", symbol: "clock", destination: .recent, count: library.files.count)
+                sidebarRow("All Media", symbol: "square.stack", destination: .all, count: library.files.count)
+                sidebarRow("Music", symbol: "music.note", destination: .music, count: library.files.filter { $0.kind == "MP3" }.count)
+                sidebarRow("Videos", symbol: "play.rectangle", destination: .videos, count: library.files.filter { $0.kind == "MP4" }.count)
+                sidebarRow("Favorites", symbol: "star", destination: .favorites, count: library.files.filter { playback.favoriteIDs.contains($0.id) }.count)
+            } header: { sidebarHeading("Library") }
             Section {
                 ForEach(library.folders, id: \.self) { folder in
-                    Label(folder, systemImage: "music.note.list")
-                        .tag(LibraryDestination.folder(folder))
+                    sidebarRow(folder, symbol: "folder", destination: .folder(folder),
+                               count: library.files.filter { library.assignments[$0.id] == folder }.count)
                         .contextMenu {
                             Button("Play") { playFolder(folder) }
                             Button("Import Music…") { importFiles(into: folder) }
@@ -150,8 +150,16 @@ struct NativeLibraryView: View {
                         }
                         .onDrop(of: [.fileURL, .plainText], isTargeted: nil) { drop($0, into: folder) }
                 }
-                Button { beginName() } label: { Label("New Folder", systemImage: "plus") }.buttonStyle(.plain)
-            } header: { Text("Folders") }
+                Button { beginName() } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "plus").font(.system(size: 12, weight: .medium))
+                            .frame(width: 24, height: 24)
+                            .background(Circle().fill(accent.opacity(0.09)))
+                        Text("New Folder").font(.system(size: 12))
+                        Spacer(minLength: 0)
+                    }.foregroundStyle(.secondary).frame(minHeight: 32).contentShape(Rectangle())
+                }.buttonStyle(.plain).help("Create a library folder")
+            } header: { sidebarHeading("Folders") }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
@@ -159,12 +167,38 @@ struct NativeLibraryView: View {
         .padding(.top, 62)
         .background(Color.black.opacity(backgroundOpacity * 0.4))
         .safeAreaInset(edge: .bottom) {
-            HStack {
-                Image(systemName: "arrow.down.circle").foregroundStyle(accent)
-                Text("\(library.files.count) saved \(library.files.count == 1 ? "item" : "items")").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Circle().fill(accent.opacity(0.8)).frame(width: 5, height: 5).accessibilityHidden(true)
+                Text("\(library.files.count) saved \(library.files.count == 1 ? "item" : "items")")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
                 Spacer()
-            }.padding(16)
+            }.padding(.horizontal, 18).padding(.vertical, 16)
         }
+    }
+    private func sidebarHeading(_ title: String) -> some View {
+        Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+            .padding(.bottom, 4)
+    }
+    private func sidebarRow(_ title: String, symbol: String, destination item: LibraryDestination, count: Int) -> some View {
+        let selected = destination == item
+        return HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: selected ? .semibold : .regular))
+                .symbolVariant(selected ? .fill : .none)
+                .foregroundStyle(selected ? accent : Color.white.opacity(0.56))
+                .frame(width: 24, height: 24)
+                .background(RoundedRectangle(cornerRadius: 7).fill(selected ? accent.opacity(0.10) : .clear))
+            Text(title).font(.system(size: 12, weight: selected ? .semibold : .regular))
+                .foregroundStyle(.white.opacity(selected ? 1 : 0.82)).lineLimit(1)
+            Spacer(minLength: 4)
+            Text("\(count)").font(.system(size: 10, weight: .medium, design: .rounded).monospacedDigit())
+                .foregroundStyle(.white.opacity(selected ? 0.65 : 0.32))
+                .accessibilityHidden(true)
+        }
+        .frame(minHeight: 32)
+        .contentShape(Rectangle())
+        .tag(item)
+        .accessibilityLabel("\(title), \(count) \(count == 1 ? "item" : "items")")
     }
     private var detail: some View {
         VStack(spacing: 0) {
@@ -209,21 +243,26 @@ struct NativeLibraryView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.leading, 20)
+        // With no sidebar the detail pane begins under the traffic lights.
+        .padding(.leading, columnVisibility == .detailOnly ? 100 : 20)
         .padding(.trailing, 190)
         .padding(.top, 12)
         .padding(.bottom, 6)
     }
     private var sidebarToggle: some View {
         Button {
-            columnVisibility = columnVisibility == .all ? .detailOnly : .all
+            // One timing curve owns the layout change. A second implicit spring
+            // on NavigationSplitView caused the column and toolbar to settle twice.
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                columnVisibility = columnVisibility == .all ? .detailOnly : .all
+            }
         } label: {
             Image(systemName: columnVisibility == .all ? "sidebar.left" : "sidebar.right")
                 .font(.system(size: 15, weight: .medium))
                 .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
+                .modifier(ClearGlassControl(radius: 22))
+                .contentShape(Circle())
         }
-        .modifier(ClearGlassControl(radius: 22))
         .buttonStyle(GlassPressStyle())
         .help(columnVisibility == .all ? "Hide Sidebar" : "Show Sidebar")
     }
@@ -243,14 +282,14 @@ struct NativeLibraryView: View {
     }
     private var importButton: some View {
         Button { importFiles(into: activeFolder) } label: {
-            Image(systemName: "square.and.arrow.down").font(.system(size: 15)).frame(width: 44, height: 44)
+            Image(systemName: "square.and.arrow.down").font(.system(size: 15)).frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(GlassPressStyle())
         .help("Import Media").disabled(library.isImporting)
     }
     private var deleteButton: some View {
         Button { requestDelete(file: selectedFile, folder: selectedFile == nil ? activeFolder : nil) } label: {
-            Image(systemName: "trash").font(.system(size: 15)).frame(width: 44, height: 44)
+            Image(systemName: "trash").font(.system(size: 15)).frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(GlassPressStyle())
         .help("Delete Selected Media")
@@ -259,7 +298,7 @@ struct NativeLibraryView: View {
     private var downloadButton: some View {
         Button { showDownloads.toggle() } label: {
             Image(systemName: engine.isRunning ? "arrow.down.circle.fill" : "arrow.down.circle")
-                .font(.system(size: 15)).frame(width: 44, height: 44)
+                .font(.system(size: 15)).frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(GlassPressStyle())
         .help("Download from a link")
@@ -269,7 +308,7 @@ struct NativeLibraryView: View {
     }
     private var settingsButton: some View {
         Button { withAnimation(motion) { showSettings = true } } label: {
-            Image(systemName: "gearshape").font(.system(size: 15)).frame(width: 44, height: 44)
+            Image(systemName: "gearshape").font(.system(size: 15)).frame(width: 44, height: 44).contentShape(Rectangle())
         }
         .buttonStyle(GlassPressStyle())
         .help("Settings")
@@ -283,9 +322,9 @@ struct NativeLibraryView: View {
             Button { showDownloads.toggle() } label: { Label("Download from a link", systemImage: "arrow.down.circle") }
             Button { withAnimation(motion) { showSettings = true } } label: { Label("Settings", systemImage: "gearshape") }
         } label: {
-            Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).frame(width: 44, height: 44).contentShape(Circle())
+            Image(systemName: "ellipsis").font(.system(size: 15, weight: .medium)).frame(width: 44, height: 44)
+                .modifier(ClearGlassControl(radius: 22)).contentShape(Circle())
         }
-        .modifier(ClearGlassControl(radius: 22))
         .buttonStyle(GlassPressStyle())
         .help("More Library Actions")
         .popover(isPresented: $showDownloads, arrowEdge: .top) {
@@ -472,8 +511,7 @@ struct NativeLibraryView: View {
         MediaImportPicker.shared.open { urls in library.importMediaAsync(urls: urls, folder: folder) }
     }
     private func move(_ file: MediaFile) {
-        let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.prompt = "Move Here"
-        if panel.runModal() == .OK, let target = panel.url { library.move(file, to: target) }
+        MediaMovePicker.shared.open(for: file) { target in library.move(file, to: target) }
     }
     private func drop(_ providers: [NSItemProvider], into folder: String?) -> Bool {
         for provider in providers {

@@ -204,3 +204,29 @@ and white images; the visualizer fixture checks partial output during long-file
 analysis and clearing that output when tracks change.
 
 Minimum-window geometry, VoiceOver and Instruments profiling remain unverified.
+
+## MediaFetch 1.2.1 maintenance
+
+Focused checks passed for pause/seek system Now Playing state, preparation intent,
+rapid queue navigation, end-of-queue and repeat-one behavior; library operations
+including destination folder rename/deletion during queued imports; helper stderr
+limits, deduped errors, unexpected exits and intentional shutdown; spectrum and
+palette fixtures. Production build, deep signature verification and ZIP integrity
+passed for the maintenance build. The final sidebar change is rebuilt and package
+verification is repeated before uploading its release assets.
+
+Packaged UI observations: clicks in the blank padding of Help and page-switch
+bubbles worked; Move opened as a native sheet and canceled without changing files;
+Space paused/resumed in Player; search text retained across workspaces while audio
+continued beyond 38 seconds. Header layout was observed in narrow and wide states.
+The revised sidebar appearance and collapsed/reopened layouts were observed.
+The user reported glitchy motion, so the overlapping springs were removed in favor
+of a single 0.22-second ease-in/out transition. That final motion remains visually
+unverified because the user requested that the app no longer be reopened. Exact
+800×680 geometry, fullscreen and VoiceOver checks also remain unverified.
+
+Two alternating runs per version of the same 300-second generated MP3 showed user
+CPU 11.76/11.69 s at baseline and 11.87/12.00 s after FFT scratch-buffer reuse, with
+maximum RSS about 22.2–22.4 MB throughout and matching band output. This isolated
+benchmark does not demonstrate a CPU/RAM gain or measure UI FPS. Instruments is
+unavailable with the installed Command Line Tools.

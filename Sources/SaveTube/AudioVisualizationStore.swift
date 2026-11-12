@@ -57,6 +57,8 @@ final class AudioVisualizationStore: ObservableObject {
         } catch {
             analysisTask?.cancel()
             analysisTask = nil
+            // Invalidate callbacks from the cancelled analysis before clearing its key.
+            generation = UUID()
             activeAnalysis = nil
             activeKey = nil
             loading = false
@@ -229,7 +231,14 @@ private final class AudioSpectrumAnalyser {
     private let setup: vDSP_DFT_Setup
     private let window: [Float]
     private let windowSum: Float
+    private let bandBins: [(lower: Int, upper: Int)]
     private var ring = [Float](repeating: 0, count: 4096)
+    // Reuse FFT scratch storage: allocating four 4096-element arrays for every
+    // ~18 Hz frame caused sustained allocator churn during long-file analysis.
+    private var real = [Float](repeating: 0, count: 4096)
+    private var imaginary = [Float](repeating: 0, count: 4096)
+    private var resultReal = [Float](repeating: 0, count: 4096)
+    private var resultImaginary = [Float](repeating: 0, count: 4096)
     private var writeIndex = 0
     private var received = 0
     private var sinceLastFrame = 0
@@ -248,6 +257,14 @@ private final class AudioSpectrumAnalyser {
         let size = 4096
         window = (0..<size).map { 0.5 - 0.5 * cos(2 * Float.pi * Float($0) / Float(size - 1)) }
         windowSum = window.reduce(0, +)
+        let upper = min(18_000, sampleRate / 2)
+        bandBins = (0..<24).map { band in
+            let lowerFrequency = 35 * pow(upper / 35, Double(band) / 24)
+            let upperFrequency = 35 * pow(upper / 35, Double(band + 1) / 24)
+            let lower = max(1, Int(floor(lowerFrequency * Double(size) / sampleRate)))
+            let upperBin = min(size / 2, max(lower, Int(ceil(upperFrequency * Double(size) / sampleRate))))
+            return (lower, upperBin)
+        }
     }
 
     deinit { vDSP_DFT_DestroySetup(setup) }
@@ -277,10 +294,10 @@ private final class AudioSpectrumAnalyser {
     }
 
     private func analyse(into values: inout [UInt8]) {
-        var real = [Float](repeating: 0, count: fftSize)
-        var imaginary = [Float](repeating: 0, count: fftSize)
-        var resultReal = [Float](repeating: 0, count: fftSize)
-        var resultImaginary = [Float](repeating: 0, count: fftSize)
+        vDSP_vclr(&real, 1, vDSP_Length(fftSize))
+        vDSP_vclr(&imaginary, 1, vDSP_Length(fftSize))
+        vDSP_vclr(&resultReal, 1, vDSP_Length(fftSize))
+        vDSP_vclr(&resultImaginary, 1, vDSP_Length(fftSize))
         var rms: Float = 0
         let available = min(received, fftSize)
         let first = received < fftSize ? 0 : writeIndex
@@ -295,13 +312,9 @@ private final class AudioSpectrumAnalyser {
             return
         }
         vDSP_DFT_Execute(setup, &real, &imaginary, &resultReal, &resultImaginary)
-        let nyquist = sampleRate / 2
-        let upper = min(18_000, nyquist)
         for band in 0..<bands {
-            let lowerFrequency = 35 * pow(upper / 35, Double(band) / Double(bands))
-            let upperFrequency = 35 * pow(upper / 35, Double(band + 1) / Double(bands))
-            let lowerBin = max(1, Int(floor(lowerFrequency * Double(fftSize) / sampleRate)))
-            let upperBin = min(fftSize / 2, max(lowerBin, Int(ceil(upperFrequency * Double(fftSize) / sampleRate))))
+            let lowerBin = bandBins[band].lower
+            let upperBin = bandBins[band].upper
             var energy: Float = 0
             for bin in lowerBin...upperBin {
                 let re = resultReal[bin]

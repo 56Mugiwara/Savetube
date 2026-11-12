@@ -34,7 +34,7 @@ enum BackgroundCopier {
             try manager.createDirectory(at: downloads, withIntermediateDirectories: true)
         } catch {
             log("Could not start \(kind) destination helper: \(error.localizedDescription)")
-            return
+            Darwin.exit(1)
         }
         // SIGTERM uses the system's normal termination behavior. An interrupted copy
         // only leaves an invisible staging file; it can never expose a partial MP3/MP4.
@@ -134,34 +134,147 @@ enum BackgroundCopier {
 
 @MainActor
 final class HelperSupervisor {
-    private var helpers: [Process] = []
+    private struct Helper {
+        let kind: String
+        let process: Process
+        let pipe: Pipe
+    }
+
+    private var helpers: [Helper] = []
+    private var reported: Set<String> = []
+    private let onError: (String) -> Void
+
+    init(onError: @escaping (String) -> Void = { _ in }) {
+        self.onError = onError
+    }
 
     func start(root: URL) {
         stop()
-        guard let executable = Bundle.main.executableURL else { return }
+        reported.removeAll()
+        guard let executable = Bundle.main.executableURL else {
+            onError("Could not find the MediaFetch copy helper executable.")
+            return
+        }
         for kind in ["MP3", "MP4"] {
             let process = Process()
+            let pipe = Pipe()
             process.executableURL = executable
             process.arguments = ["--copy-helper", kind, "--media-root", root.path]
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice
-            // Preserve diagnostics in the app's stderr without exposing any UI.
-            process.standardError = FileHandle.standardError
+            process.standardError = pipe
+            let diagnostics = HelperDiagnosticStream()
+            pipe.fileHandleForReading.readabilityHandler = { [weak self, weak process] handle in
+                let data = handle.availableData
+                let lines = diagnostics.consume(data)
+                for line in lines {
+                    FileHandle.standardError.write(Data((line + "\n").utf8))
+                    DispatchQueue.main.async { [weak self, weak process] in
+                        guard let self, let process else { return }
+                        self.receive(line, kind: kind, from: process)
+                    }
+                }
+                if data.isEmpty { handle.readabilityHandler = nil }
+            }
+            process.terminationHandler = { [weak self] finished in
+                DispatchQueue.main.async { [weak self] in
+                    self?.didTerminate(finished, kind: kind)
+                }
+            }
             do {
                 try process.run()
-                helpers.append(process)
+                helpers.append(Helper(kind: kind, process: process, pipe: pipe))
             } catch {
-                FileHandle.standardError.write(Data("Could not launch \(kind) copy helper: \(error.localizedDescription)\n".utf8))
+                pipe.fileHandleForReading.readabilityHandler = nil
+                process.terminationHandler = nil
+                try? pipe.fileHandleForReading.close()
+                report("\(kind): Could not launch copy helper: \(error.localizedDescription)", key: "\(kind):launch")
             }
         }
     }
 
+    private func receive(_ line: String, kind: String, from process: Process) {
+        guard helpers.contains(where: { $0.process === process }) else { return }
+        let category: String
+        if line.contains(" copy failed for ") { category = "copy" }
+        else if line.contains(" destination monitor:") { category = "monitor" }
+        else if line.contains("Could not start ") { category = "startup" }
+        else { return }
+        report(line, key: "\(kind):\(category)")
+    }
+
+    private func didTerminate(_ process: Process, kind: String) {
+        // Let the pipe deliver its final diagnostic before deciding whether an
+        // otherwise unexplained exit needs its own alert.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            self?.finishTermination(process, kind: kind)
+        }
+    }
+
+    private func finishTermination(_ process: Process, kind: String) {
+        guard let index = helpers.firstIndex(where: { $0.process === process }) else { return }
+        let helper = helpers.remove(at: index)
+        helper.pipe.fileHandleForReading.readabilityHandler = nil
+        try? helper.pipe.fileHandleForReading.close()
+        if !reported.contains(where: { $0.hasPrefix("\(kind):") }) {
+            report("\(kind) copy helper stopped unexpectedly (exit status \(process.terminationStatus)). Restart MediaFetch to resume copying to Downloads.", key: "\(kind):exit")
+        }
+    }
+
+    private func report(_ message: String, key: String) {
+        guard reported.insert(key).inserted else { return }
+        onError(message)
+    }
+
     func stop() {
-        for helper in helpers where helper.isRunning { helper.terminate() }
+        for helper in helpers {
+            helper.process.terminationHandler = nil
+            helper.pipe.fileHandleForReading.readabilityHandler = nil
+            if helper.process.isRunning { helper.process.terminate() }
+            try? helper.pipe.fileHandleForReading.close()
+        }
         helpers.removeAll()
     }
 
     deinit {
-        for helper in helpers where helper.isRunning { helper.terminate() }
+        for helper in helpers {
+            helper.process.terminationHandler = nil
+            helper.pipe.fileHandleForReading.readabilityHandler = nil
+            if helper.process.isRunning { helper.process.terminate() }
+            try? helper.pipe.fileHandleForReading.close()
+        }
+    }
+}
+
+/// Keeps at most one short line while draining arbitrary amounts of helper output.
+final class HelperDiagnosticStream {
+    private let lock = NSLock()
+    private var line: [UInt8] = []
+    private var truncated = false
+    private let limit = 1024
+
+    func consume(_ data: Data) -> [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        var result: [String] = []
+        for byte in data {
+            if byte == 10 {
+                if !line.isEmpty || truncated {
+                    result.append(String(decoding: line, as: UTF8.self) + (truncated ? "…" : ""))
+                }
+                line.removeAll(keepingCapacity: true)
+                truncated = false
+            } else if line.count < limit {
+                line.append(byte)
+            } else {
+                truncated = true
+            }
+        }
+        if data.isEmpty, !line.isEmpty || truncated {
+            result.append(String(decoding: line, as: UTF8.self) + (truncated ? "…" : ""))
+            line.removeAll()
+            truncated = false
+        }
+        return result
     }
 }

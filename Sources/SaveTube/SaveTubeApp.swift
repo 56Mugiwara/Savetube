@@ -13,6 +13,14 @@ struct SaveTubeApp: App {
             SaveTubeRootView(library: library, engine: engine)
                 .frame(minWidth: 800, idealWidth: 900, minHeight: 680, idealHeight: 820)
                 .preferredColorScheme(.dark)
+                .alert("Copy to Downloads", isPresented: Binding(
+                    get: { delegate.helperError != nil },
+                    set: { if !$0 { delegate.dismissHelperError() } }
+                )) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text(delegate.helperError ?? "")
+                }
                 .onAppear {
                     delegate.start(root: library.root, engine: engine)
                     DispatchQueue.main.async { _ = MediaImportPicker.shared }
@@ -46,19 +54,47 @@ struct SaveTubeApp: App {
                 Button("Retry Last Download") { engine.retry { library.refresh() } }.keyboardShortcut("r", modifiers: [.command, .shift]).disabled(engine.isRunning)
                 Button("Refresh Library") { library.refresh() }.keyboardShortcut("r")
                 Button("Import Existing History…") {
-                    let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false
-                    panel.message = "Choose the original SaveTube folder containing .Dmp3, .Dmp4, and .library.json."
-                    if panel.runModal() == .OK, let folder = panel.url { library.importLegacy(from: folder) }
+                    importExistingHistory()
                 }
             }
         }
     }
+
+    private func importExistingHistory() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.message = "Choose the original SaveTube folder containing .Dmp3, .Dmp4, and .library.json."
+        let selected: (NSApplication.ModalResponse) -> Void = { response in
+            if response == .OK, let folder = panel.url { library.importLegacy(from: folder) }
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: selected)
+        } else {
+            panel.begin(completionHandler: selected)
+        }
+    }
 }
 
-@MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let helpers = HelperSupervisor()
+@MainActor final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
+    @Published private(set) var helperError: String?
+    private var queuedHelperErrors: [String] = []
+    private lazy var helpers = HelperSupervisor { [weak self] message in
+        self?.enqueueHelperError(message)
+    }
     private var started = false
     private weak var engine: DownloadEngine?
+    private func enqueueHelperError(_ message: String) {
+        if helperError == nil { helperError = message }
+        else { queuedHelperErrors.append(message) }
+    }
+    func dismissHelperError() {
+        helperError = nil
+        if !queuedHelperErrors.isEmpty {
+            let next = queuedHelperErrors.removeFirst()
+            DispatchQueue.main.async { self.helperError = next }
+        }
+    }
     func start(root: URL, engine: DownloadEngine) { guard !started else { return }; started = true; self.engine = engine; helpers.start(root: root) }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) { engine?.cancel(); PlaybackStore.shared.stop(); helpers.stop() }
@@ -75,8 +111,8 @@ struct PillButton: View {
         Button(action: action) {
             Text(title).font(.system(size: 12, weight: .bold)).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .foregroundStyle(solid ? Color.black : Color(white: 0.95))
-                .contentShape(Rectangle().inset(by: -7))
                 .modifier(ClearGlassControl(prominent: solid))
+                .contentShape(Capsule())
         }.buttonStyle(GlassPressStyle()).onHover { hovered = $0 }
             .opacity(isEnabled ? 1 : 0.35)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hovered)

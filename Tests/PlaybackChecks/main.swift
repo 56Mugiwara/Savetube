@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import Combine
+import MediaPlayer
 
 // Keep this check independent of the library UI and its SwiftUI macro toolchain.
 struct MediaFile: Identifiable, Hashable {
@@ -50,8 +51,15 @@ struct PlaybackChecks {
         let pausedAt = store.currentTime
         try await Task.sleep(nanoseconds: 600_000_000)
         guard abs(store.currentTime - pausedAt) < 0.2 else { throw CheckFailure(description: "Pause did not hold playback position") }
+        guard MPNowPlayingInfoCenter.default().playbackState == .paused,
+              (MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double) == 0 else {
+            throw CheckFailure(description: "Pause did not update system Now Playing state")
+        }
         store.seek(to: 2)
         try await until("seek to two seconds") { abs(store.currentTime - 2) < 0.3 }
+        guard abs((MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double ?? -1) - 2) < 0.3 else {
+            throw CheckFailure(description: "Seek did not update system Now Playing position")
+        }
 
         store.next()
         try await until("MP4 duration") { store.currentFile == second && store.duration > 3 && store.player.currentItem?.status == .readyToPlay }
@@ -84,12 +92,49 @@ struct PlaybackChecks {
         guard store.favoriteIDs.contains(first.id) != wasFavorite else { throw CheckFailure(description: "Favorite did not toggle") }
         store.toggleFavorite()
 
+        // Repeated item replacement must leave the final selection and its clock intact.
+        store.play(first, queue: [first, second])
+        for _ in 0..<8 { store.next(); store.previous() }
+        try await until("rapid navigation settles") {
+            store.currentFile == first && store.player.currentItem?.status == .readyToPlay && store.duration > 3
+        }
+        try await Task.sleep(nanoseconds: 350_000_000)
+        guard store.currentFile == first, store.currentTime < 2, store.error == nil else {
+            throw CheckFailure(description: "Rapid navigation left stale playback state")
+        }
+
+        // The final item should finish with a paused transport and a reset position.
+        store.play(second, queue: [second])
+        try await until("final item ready") { store.player.currentItem?.status == .readyToPlay && store.duration > 3 }
+        store.seek(to: store.duration - 0.5)
+        try await until("queue end", timeout: 4) { !store.isPlaying && store.currentTime < 0.3 }
+        guard store.currentFile == second,
+              MPNowPlayingInfoCenter.default().playbackState == .paused,
+              (MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double) == 0 else {
+            throw CheckFailure(description: "Queue end did not leave a paused final item")
+        }
+
+        store.cycleRepeat(); store.cycleRepeat()
+        store.resume()
+        store.seek(to: store.duration - 0.5)
+        try await until("repeat-one restart", timeout: 4) { store.currentTime < 0.5 && store.isPlaying }
+        try await until("repeat-one advances") { store.currentTime > 0.2 }
+        guard store.currentFile == second else { throw CheckFailure(description: "Repeat one changed the selected file") }
+        store.cycleRepeat()
+
+        store.play(first, queue: [first, missing])
+        guard !store.canGoNext else { throw CheckFailure(description: "Unavailable queued file was offered as next") }
+        store.next()
+        guard store.currentFile == first, store.error != nil else {
+            throw CheckFailure(description: "Unavailable queued file displaced the current item")
+        }
+
         store.stop()
         guard store.currentFile == nil, store.player.currentItem == nil, !store.isPlaying,
               store.duration == 0, store.currentTime == 0, store.error == nil else {
             throw CheckFailure(description: "Stop did not reset player state")
         }
-        print("PASS playback: MP3 and MP4 AVPlayer loading, duration, advancing time, pause, seek, queue navigation, missing file, metadata, shuffle, repeat, queue editing, favorites, stop")
+        print("PASS playback: media loading, timing, pause, seek, queue navigation and end, Now Playing state, metadata, shuffle, repeat, queue editing, favorites, stop")
     }
 
     @MainActor

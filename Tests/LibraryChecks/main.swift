@@ -19,6 +19,15 @@ func waitFor(_ message: String, timeout: TimeInterval = 8, condition: () throws 
     throw CheckFailure(description: "Timed out: \(message)")
 }
 
+func waitForMain(_ message: String, timeout: TimeInterval = 8, condition: () throws -> Bool) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if try condition() { return }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+    }
+    throw CheckFailure(description: "Timed out: \(message)")
+}
+
 @MainActor
 func checkLibrary(in base: URL) throws {
     let manager = FileManager.default
@@ -157,7 +166,21 @@ func checkAsyncImport(in base: URL) throws {
     try check(manager.fileExists(atPath: first.path) && manager.fileExists(atPath: second.path), "Async import changed original files")
     let restored = LibraryStore(root: root)
     try check(restored.files.count == 2 && restored.assignments.count == 2, "Async import did not persist registrations and assignments")
-    print("PASS async imports: immediate busy state, queued background copies, main-thread merge, folders, error delivery and persistence")
+    let changing = LibraryStore(root: base.appendingPathComponent("async-changing-folders"))
+    changing.importMediaAsync(urls: [first], folder: "Rename me")
+    changing.renameFolder("Rename me", to: "Renamed during import")
+    changing.importMediaAsync(urls: [second], folder: "Delete me")
+    changing.deleteFolder("Delete me")
+    let changeDeadline = Date().addingTimeInterval(12)
+    while changing.isImporting && Date() < changeDeadline {
+        _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+    }
+    try check(!changing.isImporting && changing.files.count == 2, "Folder changes interrupted valid imports")
+    let renamedImport = try changing.files.first(where: { $0.kind == "MP3" }).unwrap("Renamed-folder import missing")
+    let unfiledImport = try changing.files.first(where: { $0.kind == "MP4" }).unwrap("Deleted-folder import missing")
+    try check(changing.assignments[renamedImport.id] == "Renamed during import", "Pending import did not follow a folder rename")
+    try check(changing.assignments[unfiledImport.id] == nil && !changing.folders.contains("Delete me"), "Pending import resurrected a deleted folder")
+    print("PASS async imports: queued copies, errors, persistence, destination rename and deletion during copy")
 }
 
 @MainActor
@@ -279,7 +302,39 @@ func checkHelpers(in base: URL, downloads: URL) throws {
     let restartedPIDs = try pidURLs.map { Int32(try String(contentsOf: $0, encoding: .utf8))! }
     supervisor.stop()
     try waitFor("restarted helpers terminate") { restartedPIDs.allSatisfy { kill($0, 0) == -1 && errno == ESRCH } }
-    print("PASS helpers: separate processes, stable MP3/MP4 copy, collision protection, partial filtering, persistent deduplication, restart and stop")
+
+    let stream = HelperDiagnosticStream()
+    try check(stream.consume(Data(repeating: 65, count: 100_000)).isEmpty, "Diagnostic stream emitted an incomplete line")
+    let capped = stream.consume(Data("\n".utf8))
+    try check(capped.count == 1 && capped[0].utf8.count <= 1_028 && capped[0].hasSuffix("…"), "Diagnostic stream retained an unbounded line")
+
+    let failingRoot = base.appendingPathComponent("helper-failure")
+    try manager.createDirectory(at: failingRoot.appendingPathComponent("MP3"), withIntermediateDirectories: true)
+    try manager.createDirectory(at: failingRoot.appendingPathComponent("MP4"), withIntermediateDirectories: true)
+    try manager.createDirectory(at: failingRoot.appendingPathComponent(".mp3-copies.json"), withIntermediateDirectories: true)
+    try Data("copy with unwritable record".utf8).write(to: failingRoot.appendingPathComponent("MP3/Failure.mp3"))
+    var failures: [String] = []
+    let failingSupervisor = HelperSupervisor { failures.append($0) }
+    failingSupervisor.start(root: failingRoot)
+    try waitForMain("copy failure reaches the app") { failures.contains(where: { $0.contains("MP3 copy failed for Failure.mp3") }) }
+    RunLoop.current.run(until: Date().addingTimeInterval(2.3))
+    try check(failures.filter { $0.contains("MP3 copy failed") }.count == 1, "Persistent copy failure flooded the app with alerts")
+    failingSupervisor.stop()
+    let failureCount = failures.count
+    RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+    try check(failures.count == failureCount, "Stopped helpers delivered late alerts")
+
+    for url in pidURLs { try manager.removeItem(at: url) }
+    var exitFailures: [String] = []
+    let exitSupervisor = HelperSupervisor { exitFailures.append($0) }
+    exitSupervisor.start(root: root)
+    try waitFor("helpers for unexpected-exit check") { pidURLs.allSatisfy { manager.fileExists(atPath: $0.path) } }
+    let exitPIDs = try pidURLs.map { Int32(try String(contentsOf: $0, encoding: .utf8))! }
+    kill(exitPIDs[1], SIGKILL)
+    try waitForMain("unexpected helper exit reaches the app") { exitFailures.contains(where: { $0.contains("MP4 copy helper stopped unexpectedly") }) }
+    exitSupervisor.stop()
+    try waitFor("unexpected-exit check cleans up remaining helper") { exitPIDs.allSatisfy { kill($0, 0) == -1 && errno == ESRCH } }
+    print("PASS helpers: separate processes, stable copies, persistent deduplication, bounded diagnostics, deduped failure alerts, unexpected exit and stop cleanup")
 }
 
 extension Optional {

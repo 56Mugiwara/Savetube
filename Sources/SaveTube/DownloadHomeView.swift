@@ -181,7 +181,7 @@ struct DownloadHomeView: View {
             PillButton(title: "Delete") { requestDelete(file: selectedFile, folder: selectedFolder) }.frame(width: 74).disabled((selectedFile == nil && selectedFolder == nil) || library.isImporting)
             Spacer()
             Button { settings = true } label: {
-                Image(systemName: "gearshape").frame(width: 38, height: 32).modifier(ClearGlassControl())
+                Image(systemName: "gearshape").frame(width: 44, height: 44).modifier(ClearGlassControl(radius: 22)).contentShape(Circle())
             }.buttonStyle(GlassPressStyle()).help("Settings")
         }.frame(height: 34)
     }
@@ -258,8 +258,8 @@ struct DownloadHomeView: View {
                 Image(systemName: "play.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .frame(width: 40, height: 40)
-                    .contentShape(Rectangle())
                     .modifier(ClearGlassControl())
+                    .contentShape(Circle())
             }
             .buttonStyle(GlassPressStyle())
             .opacity(hoveredLibraryRow == file.id || state.selected == file.id ? 1 : 0)
@@ -369,8 +369,7 @@ struct DownloadHomeView: View {
         MediaImportPicker.shared.open { urls in library.importMediaAsync(urls: urls, folder: folder) }
     }
     private func move(_ file: MediaFile) {
-        let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.prompt = "Move Here"
-        if panel.runModal() == .OK, let target = panel.url { library.move(file, to: target) }
+        MediaMovePicker.shared.open(for: file) { target in library.move(file, to: target) }
     }
     private func drop(_ providers: [NSItemProvider], into folder: String?) -> Bool {
         for provider in providers {

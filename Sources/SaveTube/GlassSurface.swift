@@ -34,7 +34,6 @@ struct GlassPressStyle: ButtonStyle {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .contentShape(Rectangle().inset(by: -4))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .brightness(configuration.isPressed ? 0.04 : 0)
             .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.76), value: configuration.isPressed)
@@ -80,7 +79,9 @@ struct ClearGlassControl: ViewModifier {
                 if prominent { content.background(shape.fill(Color.white.opacity(0.9))) }
                 else { content.background(GlassSurface(radius: radius)) }
             }
-        }.overlay(shape.strokeBorder(Color.white.opacity(focused ? 0.5 : 0), lineWidth: 1.3))
+        }
+        .contentShape(shape)
+        .overlay(shape.strokeBorder(Color.white.opacity(focused ? 0.5 : 0), lineWidth: 1.3))
     }
 }
 
@@ -91,7 +92,7 @@ struct ClearGlassButtonStyle: ButtonStyle {
             .padding(.horizontal, 12).padding(.vertical, 8)
             .frame(minHeight: 36)
             .modifier(ClearGlassControl())
-            .contentShape(Rectangle())
+            .contentShape(Capsule())
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.8), value: configuration.isPressed)
     }

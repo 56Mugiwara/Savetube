@@ -1,6 +1,6 @@
 # MediaFetch codebase audit
 
-**Scope:** source review of the working tree on 2026-11-11, including the MediaFetch 1.2.0 integration changes. The published baseline is `b4850d0`; this report describes the current source, not a verified release artifact. The original audit was read-only; follow-up implementation and focused checks are recorded under the findings they address. Findings are concrete issues or review risks, not a claim that every defect has been found.
+**Scope:** source review with follow-up maintenance on 12 November 2026. The maintenance baseline is v1.2.0 (`a35889c`). The original audit was read-only; follow-up implementation, focused checks and packaged observations are recorded separately below. Findings are concrete issues or review risks, not a claim that every defect has been found.
 
 ## Findings
 
@@ -91,3 +91,26 @@ retaining their hue; neutral artwork remains neutral.
 Exact 800×680 geometry, VoiceOver, external-volume operations and Instruments
 memory/frame-pacing profiling remain unverified. These checks do not establish a
 whole-process RAM reduction or a measured 60 FPS guarantee.
+
+## Maintenance follow-up — 1.2.1
+
+Confirmed defects fixed: system Now Playing retained a playing rate after pause;
+queued imports could recreate a deleted destination folder or lose a concurrent
+folder rename; Move and history import used nested modal loops; helper copy
+failures were invisible outside stderr. Regression fixtures cover playback state,
+queued imports, repeated helper errors, bounded lines, unexpected exits and cleanup.
+
+Control hit shapes are now owned by their labels rather than overwritten by a
+global enlarged rectangle. FFT scratch buffers and band-bin ranges are reused, and
+invalid-file requests invalidate the prior analysis generation. Focused visualizer
+and palette checks pass. A four-run isolated analysis benchmark found no measurable
+CPU/RSS improvement; no whole-app memory or frame-rate claim follows from it.
+
+See `POLISH_REPORT.md` for the current maintenance scope and verification limits.
+
+The sidebar refinement retains native List selection/accessibility and adds counts
+and restrained theme accents. Its hidden state now reserves toolbar space for the
+traffic lights. A reported animation glitch was traced to the same layout change
+being wrapped in both explicit and implicit springs; the final source uses only
+one 0.22-second ease-in/out transition. It is compiled but not visually rechecked,
+respecting the user's request not to reopen the app.

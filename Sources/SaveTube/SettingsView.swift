@@ -19,7 +19,7 @@ struct SettingsView: View {
             HStack {
                 Text("Appearance").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
                 Spacer()
-                Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Rectangle()) }.buttonStyle(GlassPressStyle()).help("Close Settings")
+                Button(action: onClose) { Image(systemName: "xmark").font(.system(size: 12, weight: .semibold)).frame(width: 44, height: 44).modifier(ClearGlassControl()).contentShape(Capsule()) }.buttonStyle(GlassPressStyle()).help("Close Settings")
             }
             VStack(alignment: .leading, spacing: 12) {
                 Text("Background").font(.system(size: 13, weight: .semibold))

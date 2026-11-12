@@ -28,6 +28,7 @@ final class LibraryStore: ObservableObject {
     @Published var lastError: String?
     @Published private(set) var isImporting = false
     private var activeImports = 0
+    private var pendingImportFolders: [UUID: String] = [:]
     nonisolated private static let importQueue = DispatchQueue(label: "SaveTube.media-import", qos: .userInitiated)
     let root: URL
 
@@ -301,6 +302,7 @@ final class LibraryStore: ObservableObject {
         guard folders.contains(old), !name.isEmpty, name != old, !folders.contains(name), canSave else { return }
         folders = folders.map { $0 == old ? name : $0 }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
         assignments = assignments.mapValues { $0 == old ? name : $0 }
+        pendingImportFolders = pendingImportFolders.mapValues { $0 == old ? name : $0 }
         if expanded.remove(old) != nil { expanded.insert(name) }
         save()
     }
@@ -310,6 +312,7 @@ final class LibraryStore: ObservableObject {
         folders.removeAll { $0 == name }
         assignments = assignments.filter { $0.value != name }
         expanded.remove(name)
+        pendingImportFolders = pendingImportFolders.filter { $0.value != name }
         save()
     }
 
@@ -367,6 +370,13 @@ final class LibraryStore: ObservableObject {
     /// file drops queue safely and keep the busy state set until all have merged.
     func importMediaAsync(urls: [URL], folder: String? = nil) {
         guard canSave, !urls.isEmpty else { return }
+        // Register the destination before copying. Renames follow the pending
+        // import; deleting a folder must not resurrect it when the copy completes.
+        let importID = UUID()
+        if let folder {
+            if !folders.contains(folder) { createFolder(folder) }
+            if folders.contains(folder) { pendingImportFolders[importID] = folder }
+        }
         activeImports += 1
         isImporting = true
         let destinationRoot = root
@@ -374,6 +384,7 @@ final class LibraryStore: ObservableObject {
             let result = Self.copyImports(urls, root: destinationRoot)
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
+                let folder = self.pendingImportFolders.removeValue(forKey: importID)
                 self.finishImport(result, folder: folder)
                 self.activeImports -= 1
                 self.isImporting = self.activeImports > 0

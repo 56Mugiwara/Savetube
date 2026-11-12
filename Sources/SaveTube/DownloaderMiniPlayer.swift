@@ -28,7 +28,7 @@ struct DownloaderMiniPlayer: View {
                             }
                             .frame(minWidth: 68, maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(height: 44).contentShape(Rectangle())
+                        .frame(height: 44).contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open player for \(file.name)")
@@ -44,7 +44,7 @@ struct DownloaderMiniPlayer: View {
                         Label("Open Player", systemImage: "arrow.up.left.and.arrow.down.right")
                             .font(.system(size: 11, weight: .semibold))
                             .padding(.horizontal, 12).frame(height: 44)
-                            .modifier(ClearGlassControl()).contentShape(Rectangle())
+                            .modifier(ClearGlassControl()).contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Open full player")
@@ -66,7 +66,7 @@ struct DownloaderMiniPlayer: View {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .semibold))
                 .frame(width: 44, height: 44)
-                .modifier(ClearGlassControl()).contentShape(Rectangle())
+                .modifier(ClearGlassControl()).contentShape(Capsule())
         }
         .buttonStyle(GlassPressStyle())
         .accessibilityLabel(label)

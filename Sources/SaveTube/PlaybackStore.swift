@@ -96,6 +96,7 @@ final class PlaybackStore: ObservableObject {
         wantsPlayback = false
         player.pause()
         isPlaying = false
+        updateNowPlaying()
     }
 
     func stop() {
@@ -120,6 +121,7 @@ final class PlaybackStore: ObservableObject {
         let target = max(0, duration > 0 ? min(seconds, duration) : seconds)
         player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = target
+        updateNowPlaying()
     }
 
     func next() {
@@ -182,7 +184,6 @@ final class PlaybackStore: ObservableObject {
                 } else if item.status == .failed {
                     self.error = item.error?.localizedDescription ?? "This file could not be played."
                     self.pause()
-                    self.updateNowPlaying()
                 }
             }
         }
@@ -293,7 +294,7 @@ final class PlaybackStore: ObservableObject {
             return .success
         }))
         remoteTargets.append((center.pauseCommand, center.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor [weak self] in self?.pause(); self?.updateNowPlaying() }
+            Task { @MainActor [weak self] in self?.pause() }
             return .success
         }))
         remoteTargets.append((center.nextTrackCommand, center.nextTrackCommand.addTarget { [weak self] _ in
